@@ -2,7 +2,7 @@
 
 Supplies for [Payload](https://payloadcms.com): track the supplies that go into the things you make or sell.
 
-**Status: 0.1.0, not on npm yet.** 16 tests pass against a real MongoDB (in memory, single-node replica set) on Payload 3.92: movements, recipes, the refusal to go below zero, the low-stock email firing once, two senders racing for one alert, site isolation and access. The admin overview has not been tested by a person yet, with a keyboard or a screen reader.
+**Status: 0.1.0, not on npm yet.** 16 tests pass against a real MongoDB (in memory, single-node replica set) on Payload 3.92: movements, recipes, the refusal to go below zero, the low-stock email firing once, two senders racing for one alert, site isolation and access. The overview at `/admin/supplies` was checked in a local dev server of a real host app with made-up data: it renders, its headings and tables are in order, and its text and buttons measured 15:1 contrast or better in dark mode. It hasn't been tried by a person, with a keyboard or a screen reader.
 
 ## What it does
 
