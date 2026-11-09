@@ -817,3 +817,20 @@ describe('box suggestions', () => {
     expect(fallback.notes).toContain('Rates unavailable from Down Post; ranked by box cost and your postage rates.')
   })
 })
+
+describe('accepting a suggested number to keep', () => {
+  it('sets the number only for people who manage that recipe, and only a whole number', async () => {
+    const swab = await create('supply-items', { tenant: siteA.id, name: 'Accept swab', unit: 'each', openingStock: 10 })
+    const recipe = await create('supply-recipes', { tenant: siteA.id, name: 'Accept kit', key: `acc-${Math.random().toString(36).slice(2, 8)}`, lines: [{ item: swab.id, quantity: 1 }] })
+    const endpoint = payload.config.endpoints.find((e) => e.path === '/kitting/baseline')!
+    const call = (user: Doc | null, value: unknown) => endpoint.handler({ payload, user: user && { ...user, collection: 'users' }, json: async () => ({ recipe: recipe.id, value }) } as never) as Promise<Response>
+    expect((await call(null, 4)).status).toBe(401)
+    expect((await call(staffB, 4)).status).toBe(403)
+    expect((await call(viewerA, 4)).status).toBe(403)
+    expect((await call(staffA, -1)).status).toBe(400)
+    expect((await call(staffA, 2.5)).status).toBe(400)
+    expect((await get('supply-recipes', recipe.id)).readyStock?.baseline ?? null).toBeNull()
+    expect((await call(staffA, 4)).status).toBe(200)
+    expect(await get('supply-recipes', recipe.id)).toMatchObject({ readyStock: { baseline: 4 }, stockState: 'build-more' })
+  })
+})

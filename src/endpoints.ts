@@ -1,7 +1,7 @@
 import type { Endpoint, PayloadRequest } from 'payload'
 
 import { buildUnits, mayManageDoc, voidUnit, type VoidReason } from './build.js'
-import { KittingError, suppliesOf } from './stock.js'
+import { KittingError, sendPendingAlerts, suppliesOf } from './stock.js'
 import type { ID } from './types.js'
 
 type Body = Record<string, unknown>
@@ -35,6 +35,20 @@ export const kittingEndpoints: Endpoint[] = [
         const ids = Array.isArray(body.externalIds) ? body.externalIds : []
         const r = await buildUnits(req.payload, { id: body.recipe as ID }, ids, { req: { user: req.user, payload: req.payload } as PayloadRequest })
         return { recipe: r.recipe, units: r.units.map((u) => ({ id: u.id, externalId: u.externalId })), shortages: r.shortages }
+      }),
+  },
+  {
+    path: '/kitting/baseline',
+    method: 'post',
+    handler: (req) =>
+      guarded(req, (o) => o.recipes, 'recipe', async (body) => {
+        const value = body.value
+        if (!(typeof value === 'number' && Number.isInteger(value) && value >= 0)) throw new KittingError('baseline', 'The number to keep is a whole number, 0 or more.')
+        const o = suppliesOf(req.payload)
+        const recipe = (await req.payload.findByID({ collection: o.recipes as never, id: body.recipe as ID, depth: 0, overrideAccess: true })) as Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
+        await req.payload.update({ collection: o.recipes as never, id: recipe.id, data: { readyStock: { ...(recipe.readyStock ?? {}), baseline: value } } as never, overrideAccess: true, user: req.user })
+        await sendPendingAlerts(req.payload).catch(() => undefined)
+        return { recipe: recipe.id, baseline: value }
       }),
   },
   {

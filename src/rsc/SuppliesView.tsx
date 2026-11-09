@@ -2,7 +2,21 @@ import { DefaultTemplate } from '@payloadcms/next/templates'
 import type { AdminViewServerProps, Payload, PayloadRequest } from 'payload'
 import React from 'react'
 
+import type { CollectionSlug } from 'payload'
+
+import { recommendReadyStock } from '../build.js'
+import { AcceptBaseline } from '../client/AcceptBaseline.js'
+import { readyStatus, STATE_TEXT, type ReadyStatus } from '../readystock.js'
 import { sendPendingAlerts, stockReport, suppliesOf, writeOffExpired, type StockRow } from '../stock.js'
+import type { Recommendation } from '../stocklevel.js'
+
+const METHOD_NAMES: Record<string, string> = {
+  statistical: 'Safety stock',
+  multiplier: 'Days of cover',
+  minmax: 'Minimum and maximum',
+  trend: 'Following the trend',
+  manual: 'A fixed number',
+}
 
 const fmt = new Intl.NumberFormat('en', { maximumFractionDigits: 3 })
 const qty = (n: number | null, unit: string) => (n === null ? '—' : `${fmt.format(n)} ${unit}`)
@@ -45,6 +59,21 @@ export async function SuppliesView({ initPageResult, params, searchParams }: Adm
   if (ok && o.autoWriteOff) await writeOffExpired(req.payload).catch((error) => req.payload.logger.error({ err: error, msg: 'kitting: expired lots not written off' }))
   if (ok) await sendPendingAlerts(req.payload).catch((error) => req.payload.logger.error({ err: error, msg: 'kitting: pending alerts not sent' }))
   const { rows, below, expiring } = ok ? await stockReport(req.payload, { user: req.user }) : { rows: [], below: [], expiring: [] }
+  // Ready stock: recipes with a number to keep, or with built units.
+  const canManage = ok && Boolean(await o.manage({ req } as never))
+  const recipes = ok
+    ? ((await req.payload.find({ collection: o.recipes as CollectionSlug, where: { active: { not_equals: false } }, overrideAccess: false, user: req.user, depth: 0, pagination: false, sort: 'name' })).docs as Record<string, any>[]) // eslint-disable-line @typescript-eslint/no-explicit-any
+    : []
+  const ready: { status: ReadyStatus; recs: Recommendation[]; waiting: number }[] = []
+  for (const r of recipes) {
+    const built = await req.payload.count({ collection: o.units as CollectionSlug, where: { recipe: { equals: r.id } }, overrideAccess: true })
+    if (!built.totalDocs && typeof r.readyStock?.baseline !== 'number') continue
+    const waiting = (await req.payload.find({ collection: o.requests as CollectionSlug, where: { and: [{ recipe: { equals: r.id } }, { status: { equals: 'open' } }] }, overrideAccess: true, depth: 0, pagination: false })).docs.reduce(
+      (t, q) => t + (Number((q as { count?: number }).count ?? 0) - Number((q as { filled?: number }).filled ?? 0)),
+      0,
+    )
+    ready.push({ status: await readyStatus(req.payload, r), recs: (await recommendReadyStock(req.payload, r.id)).recommendations, waiting })
+  }
   const current = rows.filter((r) => !r.retired)
   const retired = rows.filter((r) => r.retired)
   const showScope = Boolean(o.scopeField) && new Set(rows.map((r) => String(r.scope))).size > 1
@@ -104,6 +133,8 @@ export async function SuppliesView({ initPageResult, params, searchParams }: Adm
                 <li><a className="btn btn--style-secondary btn--size-small" style={{ margin: 0 }} href={`${admin}/collections/${o.recipes}`}>Recipes</a></li>
                 <li><a className="btn btn--style-secondary btn--size-small" style={{ margin: 0 }} href={`${admin}/collections/${o.suppliers}`}>Suppliers</a></li>
                 <li><a className="btn btn--style-secondary btn--size-small" style={{ margin: 0 }} href={`${admin}/collections/${o.units}`}>Built units</a></li>
+                <li><a className="btn btn--style-secondary btn--size-small" style={{ margin: 0 }} href={`${admin}/collections/${o.requests}`}>Build requests</a></li>
+                <li><a className="btn btn--style-secondary btn--size-small" style={{ margin: 0 }} href={`${admin}/collections/${o.boxes}`}>Boxes</a></li>
                 <li><a className="btn btn--style-secondary btn--size-small" style={{ margin: 0 }} href={`${admin}/collections/${o.lots}`}>Lots</a></li>
                 <li><a className="btn btn--style-secondary btn--size-small" style={{ margin: 0 }} href={`${admin}/collections/${o.movements}`}>Stock log</a></li>
               </ul>
@@ -166,6 +197,55 @@ export async function SuppliesView({ initPageResult, params, searchParams }: Adm
                 </>
               )}
             </section>
+
+            {ready.length > 0 && (
+              <section aria-labelledby="supplies-ready">
+                <h2 id="supplies-ready" style={{ marginTop: 0 }}>Ready stock</h2>
+                {ready.map(({ status, recs, waiting }) => (
+                  <section key={String(status.recipe.id)} aria-label={`Ready stock: ${status.recipe.name}`} style={{ marginBottom: 'var(--base)' }}>
+                    <h3 style={{ margin: '0 0 4px' }}>
+                      <a href={`${admin}/collections/${o.recipes}/${status.recipe.id}`}>{status.recipe.name}</a>
+                      {status.state ? <span style={{ fontWeight: 400 }}>: {status.state === 'urgent' ? <strong>{STATE_TEXT[status.state]}</strong> : STATE_TEXT[status.state]}</span> : null}
+                    </h3>
+                    <p style={{ margin: '0 0 8px' }}>
+                      {status.ready} ready{status.baseline !== null ? `, keeping ${status.baseline}` : ', no number to keep set yet'}
+                      {status.toBuild ? `. Build ${status.toBuild}` : ''}
+                      {`. Supplies for ${status.canBuild} more`}
+                      {waiting ? `. ${waiting} waiting for orders` : ''}.
+                      {status.reasons.length ? ` Low: ${status.reasons.join('; ')}.` : ''}
+                    </p>
+                    <table style={table}>
+                      <caption style={caption}>How many to keep ready, by each method. Nothing changes until you choose one.</caption>
+                      <thead>
+                        <tr>
+                          <th scope="col" style={cell}>Method</th>
+                          <th scope="col" style={num}>Keep</th>
+                          <th scope="col" style={cell}>Why</th>
+                          {canManage && <th scope="col" style={cell}><span style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' }}>Action</span></th>}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {recs.map((rec, i) => (
+                          <tr key={rec.method}>
+                            <th scope="row" style={{ ...cell, fontWeight: i === 0 ? 600 : 400 }}>
+                              {METHOD_NAMES[rec.method]}
+                              {i === 0 ? <span style={{ display: 'block', fontSize: 13, fontWeight: 400 }}>Chosen for this recipe</span> : null}
+                            </th>
+                            <td style={num}>{rec.target ?? '—'}</td>
+                            <td style={cell}>{rec.explanation}</td>
+                            {canManage && (
+                              <td style={cell}>
+                                {rec.target !== null ? <AcceptBaseline recipe={String(status.recipe.id)} recipeName={status.recipe.name} value={rec.target} current={status.baseline} apiRoute={req.payload.config.routes.api} /> : null}
+                              </td>
+                            )}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </section>
+                ))}
+              </section>
+            )}
 
             {expiring.length > 0 && (
               <section aria-labelledby="supplies-expiring">
