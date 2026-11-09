@@ -35,7 +35,7 @@ describe('shrinkage allowance', () => {
   })
   it('reads plainly', () => {
     expect(describeUse({ quantity: 18, unit: 'g', name: 'beans', percent: 5, per: 'drink' })).toBe('18 g of beans per drink + 5% shrinkage allowance')
-    expect(describeUse({ quantity: 2, unit: 'each', name: 'swabs', percent: 0 })).toBe('2 each of swabs')
+    expect(describeUse({ quantity: 2, unit: 'each', name: 'swabs', percent: 0 })).toBe('2 × swabs')
   })
 })
 

@@ -225,7 +225,7 @@ export async function SuppliesView({ initPageResult, params, searchParams }: Adm
                         </tr>
                       </thead>
                       <tbody>
-                        {recs.map((rec, i) => (
+                        {recs.filter((rec, i) => i === 0 || !rec.fallback).map((rec, i) => (
                           <tr key={rec.method}>
                             <th scope="row" style={{ ...cell, fontWeight: i === 0 ? 600 : 400 }}>
                               {METHOD_NAMES[rec.method]}
@@ -242,6 +242,9 @@ export async function SuppliesView({ initPageResult, params, searchParams }: Adm
                         ))}
                       </tbody>
                     </table>
+                    {recs.some((rec, i) => i > 0 && rec.fallback) ? (
+                      <p style={{ margin: '8px 0 0', fontSize: 13 }}>Methods that need more sales history aren’t shown yet: {recs.filter((rec, i) => i > 0 && rec.fallback).map((rec) => METHOD_NAMES[rec.method]).join(', ')}.</p>
+                    ) : null}
                   </section>
                 ))}
               </section>

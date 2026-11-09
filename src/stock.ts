@@ -130,7 +130,8 @@ export function shrinkagePercent(o: Pick<ResolvedSupplies, 'shrinkage'>, item: D
 
 /** "18 g of Beans + 5% shrinkage allowance": a recipe line in plain words. */
 export function describeUse(args: { quantity: number; unit: string; name: string; percent: number; per?: string }) {
-  const base = `${fmt(args.quantity)} ${args.unit} of ${args.name}${args.per ? ` per ${args.per}` : ''}`
+  const counted = args.unit === 'each' || args.unit === ''
+  const base = `${fmt(args.quantity)}${counted ? ' ×' : ` ${args.unit} of`} ${args.name}${args.per ? ` per ${args.per}` : ''}`
   return args.percent > 0 ? `${base} + ${fmt(args.percent)}% shrinkage allowance` : base
 }
 

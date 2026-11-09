@@ -79,8 +79,8 @@ export const kittingPlugin =
               afterNavLinks: [...(components.afterNavLinks ?? []), '@captiveorigins/payload-plugin-kitting/rsc#SuppliesNavLink'],
               views: {
                 ...components.views,
-                supplies: { Component: '@captiveorigins/payload-plugin-kitting/rsc#SuppliesView', path: '/supplies' },
-                suppliesBuild: { Component: '@captiveorigins/payload-plugin-kitting/rsc#BuildView', path: '/supplies/build' },
+                supplies: { Component: '@captiveorigins/payload-plugin-kitting/rsc#SuppliesView', path: '/supplies', exact: true },
+                suppliesBuild: { Component: '@captiveorigins/payload-plugin-kitting/rsc#BuildView', path: '/supplies/build', exact: true },
               },
             },
           }
