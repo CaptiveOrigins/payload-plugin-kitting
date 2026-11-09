@@ -123,3 +123,7 @@ The waste and dud buffer is called **shrinkage**, the standard business term for
 - Config: `shrinkage: { enabled, defaultPercent }`. Fields: `shrinkagePercent` on items, recipes and recipe lines. Each movement records its `shrinkageAllowance`. The suggestion function is `suggestShrinkagePercent`.
 - Recorded losses are the movement kind `written-off`, replacing `wasted`. Each carries a `writeOffReason`: spoiled, damaged, defective, expired, lost or other. Write-offs feed the learned suggestion.
 - Voided built units keep their own reasons (dud, damaged, built by mistake, other). These are about a unit, not about stock.
+
+## 2026-11-08 (owner): test locally first, then publish
+
+The first npm version comes only after the owner has tried Kitting by hand: owner test T14 in the ops tests list, then N29 (the publish) with "Needs first: T14 passed". T14 runs on the owner's Mac against a locally packed copy (`npm pack`) and the platform's local Kitting branch, with nothing published, pushed or merged. The platform branch `supplies-plugin` waits for N29. This keeps the rule that the first published version has no untried UI.
