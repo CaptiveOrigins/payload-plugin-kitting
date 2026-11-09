@@ -75,3 +75,22 @@ This extends the "learned over time" decision above. Businesses approach this di
 - **Manual:** a fixed number. This is also the fallback when there's too little history.
 
 Each method shows its result with a plain-language explanation. The admin can compare the methods side by side before choosing one. The README says when each one suits a business. Unit tests check each method against known values.
+
+## 2026-11-08 (owner): who Kitting is for
+
+The owner's example: a family-run coffee shop sets it up once, "by being thorough and setting recipes down to the tee", and from then on it tracks how much they need of every single thing in the shop. "The point is that it could make running a business for someone so easy they could do it themselves." Kits on Captive Origins stay the first user, but Kitting is designed and worded for a small business owner with no IT department. The layered setup stays (tracker → recipes and builder → fulfilment), so the simple case stays simple.
+
+Planned as a result:
+
+1. **Waste and dud allowance**, which the owner calls realistic "in all sectors of life".
+   - A loss % per item and per recipe, covering spills, spoilage, defects and duds.
+   - A global on/off, with per-item overrides.
+   - Optionally, a suggested % learned from recorded adjustments over time.
+   - Shown plainly, for example "needs 18 g of beans per drink + 5% waste allowance".
+2. **Units and conversions:** g, kg, ml, l, units and packs of N. A supply can be bought in one unit and used in another (a 1 kg bag used 18 g at a time), with each conversion defined once.
+3. **Nested recipes:** a recipe can use another recipe, such as a house syrup batch used in many drinks. Building or selling the parent draws down the sub-recipe correctly.
+4. **Perishables (optional):** shelf life per item or batch, expiry warnings, and first-expiring-first-used. Expired stock is written off into the waste figures.
+5. **Getting started:** a guided setup (items, then recipes, then a first stock count), and an everyday view of what's low, what to make and what to buy, in wording a café owner understands.
+6. **Later, not now:**
+   - Automatic supplier ordering after N days under the threshold. It's in docs/roadmap.md with a design note: supplier catalogues, approval by default, and never spending without a yes.
+   - Point-of-sale integrations that turn sales into usage.

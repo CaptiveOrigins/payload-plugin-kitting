@@ -2,17 +2,28 @@
 
 Kitting for [Payload](https://payloadcms.com): track supplies, and optionally build multi-part products (kits) from them. Used plainly, it's a supply tracker. Switch on more and it builds kits, keeps a ready stock and helps you pack orders.
 
-**Status: 0.1.0, not on npm yet. Only level 1 and part of level 2 exist so far** (see Levels).
+It's meant for a small business with no IT department. Picture a family-run coffee shop. They set it up once, carefully: every bag of beans, every carton of milk, and a recipe for every drink, down to the gram. From then on it knows how much of everything they need. The aim is to make running the stock side of a business easy enough that the owners can do it themselves.
+
+**Status: 0.1.0, not on npm yet. Only level 1 and part of level 2 exist so far.** Most of what's described below is planned, and each item says so.
 
 ## Levels
 
-You switch on only what you need:
+You switch on only what you need, and the simple case stays simple:
 
 1. **Supply tracker.** Supplies, suppliers, a stock log and low-stock email. Nothing else. *Built.*
-2. **Recipes and kit builder.** What goes into one kit. Recipes and `applyRecipe` are built. *Planned:* a builder in the admin where you scan or type each kit's ID, and its supplies are taken off automatically.
-3. **Fulfilment.** *Planned:* assigning ready kits to orders, a "build one" queue, a ready-stock target with a recommendation learned from your sales, and box suggestions by cost.
+2. **Recipes and builder.** What goes into one drink, kit or product. Recipes and `applyRecipe` are built. *Planned:* a builder in the admin where you scan or type each kit's ID and its supplies are taken off automatically, and recipes that use other recipes (a batch of house syrup used in many drinks).
+3. **Fulfilment.** *Planned:* ready stock assigned to orders (natively with Payload's ecommerce plugin, or through Kitting's own API), a "make one" queue, a recommended ready-stock level learned from your sales, and box suggestions by cost, using real postage when a shipping plugin is installed.
 
 Today levels 1 and 2 are always on together; the switches come with the builder.
+
+## Planned for every level
+
+- **Waste allowance.** Spills, spoilage, defects and duds happen. Each supply and recipe can carry a loss allowance in %, shown plainly: "18 g of beans per drink + 5% waste allowance". It can be switched off for the whole site, and overridden per item. Optionally, Kitting suggests the % from the corrections you've recorded.
+- **Units.** Buy in one unit and use in another: a 1 kg bag used 18 g at a time, or packs of 50 used one at a time. You set each conversion once.
+- **Use-by dates** (optional): a shelf life per supply or batch, warnings before things expire, and the oldest used first. Expired stock is written off and counts as waste.
+- **Getting started and everyday use.** A guided setup (your supplies, then your recipes, then a first stock count), and an everyday page: what's low, what to make, what to buy. The wording is meant for a shop owner, not an engineer.
+
+Later, not yet: ordering from suppliers when something stays low for a few days (see [docs/roadmap.md](docs/roadmap.md)), and turning till sales into usage.
 
 **Testing so far:** 16 tests pass against a real MongoDB (in memory, single-node replica set) on Payload 3.92: movements, recipes, the refusal to go below zero, the low-stock email firing once, two senders racing for one alert, site isolation and access. The overview at `/admin/supplies` was checked in a local dev server of a real host app with made-up data: it renders, its headings and tables are in order, and its text and buttons measured 15:1 contrast or better in dark mode. It hasn't been tried by a person, with a keyboard or a screen reader.
 
