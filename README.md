@@ -1,27 +1,40 @@
 # payload-plugin-kitting
 
-Kitting for [Payload](https://payloadcms.com): track supplies, and optionally build multi-part products (kits) from them. Used plainly, it's a supply tracker. Switch on more and it builds kits, keeps a ready stock and helps you pack orders.
+Kitting for [Payload](https://payloadcms.com): anyone from a café to a genomics lab can track their supplies, and optionally build multi-part products (kits) from them. Used plainly, it's a supply tracker. Switch on more and it builds kits, keeps a ready stock and helps you pack orders.
 
-It's meant for a small business with no IT department. Picture a family-run coffee shop. They set it up once, carefully: every bag of beans, every carton of milk, and a recipe for every drink, down to the gram. From then on it knows how much of everything they need. The aim is to make running the stock side of a business easy enough that the owners can do it themselves.
+It's meant for people with no IT department. You set it up once and carefully, with every item and a recipe for everything you make, down to the gram or the microlitre. From then on it knows how much of everything you need.
 
 **Status: 0.1.0, not on npm yet. Only level 1 and part of level 2 exist so far.** Most of what's described below is planned, and each item says so.
+
+## Two examples
+
+The same few words cover both: an **item** is anything you keep in stock, a **recipe** says what goes into one of something, a **build** makes one or more from a recipe, and an **assembled unit** is one you've built and labelled with an **external ID**.
+
+| | A café | A genomics lab |
+|---|---|---|
+| Items | Beans (bought in 1 kg bags, used in grams), milk, cups, lids, syrups | Swabs, tubes, buffer (bought in litres, used in microlitres), labels, mailers |
+| Recipes | A latte: 18 g beans, 200 ml milk, a cup, a lid. House syrup is its own recipe, used in many drinks | A sample kit: two swabs, a tube with 500 µl buffer, a label, a mailer |
+| Builds | Drinks, as they're sold | Kits, each scanned in under the ID printed on its tube |
+| Lots and use-by | Milk goes off: oldest first, out-of-date stock written off | Each buffer and swab lot has an expiry; every kit records which lots went into it |
+| Waste allowance | Spills and spoilage: "18 g of beans + 5% waste" | Failed and dud kits: a failure rate, learned from what gets recorded |
+| Ready stock | (not usually) | Kits kept built and ready to send, with a recommended level |
 
 ## Levels
 
 You switch on only what you need, and the simple case stays simple:
 
-1. **Supply tracker.** Supplies, suppliers, a stock log and low-stock email. Nothing else. *Built.*
-2. **Recipes and builder.** What goes into one drink, kit or product. Recipes and `applyRecipe` are built. *Planned:* a builder in the admin where you scan or type each kit's ID and its supplies are taken off automatically, and recipes that use other recipes (a batch of house syrup used in many drinks).
-3. **Fulfilment.** *Planned:* ready stock assigned to orders (natively with Payload's ecommerce plugin, or through Kitting's own API), a "make one" queue, a recommended ready-stock level learned from your sales, and box suggestions by cost, using real postage when a shipping plugin is installed.
+1. **Supply tracker.** Items, suppliers, a stock log and low-stock email. Nothing else. *Built.*
+2. **Recipes and builder.** Recipes and `applyRecipe` are built. *Planned:* a builder in the admin where you scan or type each unit's external ID and its items are taken off automatically, recording the lots used; recipes that use other recipes.
+3. **Fulfilment.** *Planned:* ready units assigned to orders (natively with Payload's ecommerce plugin, or through Kitting's own API), a "build one" queue, a recommended ready-stock level learned from your sales, and box suggestions by cost, using real postage when a shipping plugin is installed.
 
 Today levels 1 and 2 are always on together; the switches come with the builder.
 
 ## Planned for every level
 
-- **Waste allowance.** Spills, spoilage, defects and duds happen. Each supply and recipe can carry a loss allowance in %, shown plainly: "18 g of beans per drink + 5% waste allowance". It can be switched off for the whole site, and overridden per item. Optionally, Kitting suggests the % from the corrections you've recorded.
-- **Units.** Buy in one unit and use in another: a 1 kg bag used 18 g at a time, or packs of 50 used one at a time. You set each conversion once.
-- **Use-by dates** (optional): a shelf life per supply or batch, warnings before things expire, and the oldest used first. Expired stock is written off and counts as waste.
-- **Getting started and everyday use.** A guided setup (your supplies, then your recipes, then a first stock count), and an everyday page: what's low, what to make, what to buy. The wording is meant for a shop owner, not an engineer.
+- **Waste allowance.** Spills, spoilage, defects, failures and duds happen. Each item and recipe can carry a loss allowance in %, shown plainly ("18 g of beans per drink + 5% waste allowance"). It can be switched off for the whole site and overridden per item. Optionally, Kitting suggests the % from the corrections you've recorded.
+- **Units.** Buy in one unit and use in another: a 1 kg bag used 18 g at a time, a litre of buffer used 500 µl at a time, packs of 100 used one by one. You set each conversion once.
+- **Lots and use-by dates** (optional): a lot number and shelf life per delivery, warnings before things expire, and the first to expire used first. Every build records which lots it used, so a bad lot can be traced to the units it went into. Expired stock is written off and counts as waste.
+- **Getting started and everyday use.** A guided setup (your items, then your recipes, then a first stock count), and an everyday page: what's low, what to make, what to buy. Plain wording, for a shop owner or a lab manager, not an engineer.
 
 Later, not yet: ordering from suppliers when something stays low for a few days (see [docs/roadmap.md](docs/roadmap.md)), and turning till sales into usage.
 
@@ -29,7 +42,7 @@ Later, not yet: ordering from suppliers when something stays low for a few days 
 
 ## What it does
 
-- **Supplies** (`supply-items`): name, unit (each, ml, metres…), SKU, supplier, on hand, low-stock level, reorder quantity, notes. You give the opening stock when you add one.
+- **Supplies** (`supply-items`): name, unit (each, g, ml…), SKU, supplier, on hand, low-stock level, reorder quantity, notes. You give the opening stock when you add one.
 - **Suppliers**: name, order email, phone, website, usual delivery time, notes.
 - **Stock movements** (`supply-movements`): the stock log. Received, used, or adjusted (+ or −), with who, why and a reference. A movement can't be edited or deleted, even through the Local API: you fix a mistake with an adjustment. On hand is only ever changed by a movement, so it always equals the sum of the item's log, opening stock included.
 - **Recipes** (`supply-recipes`): what goes into one of something, as supplies × quantity. Your code calls `applyRecipe` when it makes something, and the plugin writes one `used` movement per supply, in one transaction.
@@ -70,8 +83,8 @@ Then run `payload generate:importmap`, because the overview is an admin view.
 import { applyRecipe, KittingError } from '@captiveorigins/payload-plugin-kitting'
 
 try {
-  const { movements } = await applyRecipe(payload, { key: 'gift-box' }, 50, {
-    reference: 'Batch 2026-11-08',
+  const { movements } = await applyRecipe(payload, { key: 'sample-kit' }, 50, {
+    reference: 'Kit batch 2026-11-08',
     user: req.user,
   })
 } catch (error) {
@@ -86,7 +99,7 @@ To make the stock part of a bigger change, pass your transaction as `req`. If yo
 
 ```ts
 const transactionID = await payload.db.beginTransaction()
-await applyRecipe(payload, { key: 'gift-box' }, 50, { req: { transactionID }, scope: siteId })
+await applyRecipe(payload, { key: 'house-latte' }, 1, { req: { transactionID }, scope: siteId })
 // …your own writes with the same req…
 await payload.db.commitTransaction(transactionID)
 await sendPendingAlerts(payload)

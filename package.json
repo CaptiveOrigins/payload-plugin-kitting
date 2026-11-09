@@ -1,7 +1,7 @@
 {
   "name": "@captiveorigins/payload-plugin-kitting",
   "version": "0.1.0",
-  "description": "Kitting for Payload: track supplies, and optionally build multi-part products (kits) from them, with suppliers, stock from an append-only movement log, recipes that use stock in one transaction, one low-stock email per drop and a reorder list.",
+  "description": "Kitting for Payload: track supplies, and optionally build multi-part products (kits) from them, for anyone from a café to a genomics lab. Suppliers, stock from an append-only log, recipes that use stock in one transaction, one low-stock email per drop and a reorder list.",
   "homepage": "https://github.com/CaptiveOrigins/payload-plugin-kitting#readme",
   "bugs": {
     "url": "https://github.com/CaptiveOrigins/payload-plugin-kitting/issues"

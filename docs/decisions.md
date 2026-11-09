@@ -94,3 +94,13 @@ Planned as a result:
 6. **Later, not now:**
    - Automatic supplier ordering after N days under the threshold. It's in docs/roadmap.md with a design note: supplier catalogues, approval by default, and never spending without a yes.
    - Point-of-sale integrations that turn sales into usage.
+
+## 2026-11-08 (owner): from a café to a genomics lab
+
+The owner: "Our point should be that anyone could use it from a cafe to a genomics lab." This is the README's opening line and the spirit of the package description.
+
+- The docs use two worked examples side by side throughout.
+  - **A café:** beans, milk, cups, syrups, perishables and a waste allowance.
+  - **A genomics lab:** swabs, tubes, buffers, reagent lots, and sample kits with an external ID, lot and expiry tracking, and failure rates as the dud allowance.
+- Every term stays neutral ("item", "recipe", "build", "assembled unit", "external ID"), so neither domain feels bolted on.
+- Lot and batch tracking with expiry is planned. **Each built unit records which lots it used**, so a bad lot can be traced to every unit it went into.
