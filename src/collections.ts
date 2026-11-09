@@ -2,6 +2,9 @@ import type { CollectionAfterChangeHook, CollectionAfterOperationHook, Collectio
 
 import { ALLOW_DELETE, INTERNAL, alertFields, applyMovementToItem, asInternal, idOf, prepareMovement, round, sameID, sendPendingAlerts, KittingError } from './stock.js'
 import type { ResolvedSupplies } from './types.js'
+import { normalizeUnit } from './units.js'
+
+const OPENING_LOT = 'kittingOpeningLot'
 
 type Doc = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -47,7 +50,16 @@ export function itemsCollection(o: ResolvedSupplies): CollectionConfig {
       for (const f of ALERT_FIELDS) data[f] = originalDoc?.[f] ?? null
       Object.assign(data, alertFields(originalDoc ?? {}, data.onHand, effectiveLevel))
     }
+    if (operation === 'create') req.context = { ...req.context, [OPENING_LOT]: { lotNumber: data.openingLotNumber ?? null, expiresOn: data.openingExpiresOn ?? null } }
     delete data.openingStock
+    delete data.openingLotNumber
+    delete data.openingExpiresOn
+    if (data.unit !== undefined) data.unit = normalizeUnit(data.unit) || 'each'
+    if (Array.isArray(data.packs))
+      for (const p of data.packs as Doc[]) {
+        if (!(typeof p.size === 'number' && p.size > 0)) throw new KittingError('pack', `The pack "${p.name ?? ''}" needs a size of more than zero.`)
+        if (normalizeUnit(p.name) === normalizeUnit(data.unit ?? originalDoc?.unit)) throw new KittingError('pack', 'A pack can’t have the same name as the unit.')
+      }
     if (o.scopeField && data.supplier !== undefined) await sameScope(req, o, data[o.scopeField] ?? originalDoc?.[o.scopeField], o.suppliers, data.supplier, 'That supplier')
     return data
   }
@@ -55,8 +67,14 @@ export function itemsCollection(o: ResolvedSupplies): CollectionConfig {
   const afterChange: CollectionAfterChangeHook = async ({ doc, operation, req }) => {
     if (operation !== 'create' || !(doc.onHand > 0)) return doc
     const by = req.user && req.user.collection === o.userSlug ? req.user.id : null
+    const opening = (req.context?.[OPENING_LOT] ?? {}) as Doc
     await asInternal(req, { opening: true, by }, () =>
-      req.payload.create({ collection: o.movements as CollectionSlug, data: { item: doc.id, kind: 'adjusted', quantity: doc.onHand, reason: 'Opening stock' } as never, ...sys, req }),
+      req.payload.create({
+        collection: o.movements as CollectionSlug,
+        data: { item: doc.id, kind: 'adjusted', quantity: doc.onHand, reason: 'Opening stock', lotNumber: opening.lotNumber, expiresOn: opening.expiresOn } as never,
+        ...sys,
+        req,
+      }),
     )
     return doc
   }
@@ -81,18 +99,49 @@ export function itemsCollection(o: ResolvedSupplies): CollectionConfig {
       {
         type: 'row',
         fields: [
-          { name: 'unit', type: 'text', required: true, defaultValue: 'each', label: 'Unit', admin: { description: 'How you count it: each, ml, metres, box of 100…', width: '50%' } },
+          {
+            name: 'unit',
+            type: 'text',
+            required: true,
+            defaultValue: 'each',
+            label: 'Counted in',
+            admin: { description: 'The smallest unit you use it in: each, g, ml, µl… Stock is kept in this unit.', width: '50%' },
+          },
           { name: 'sku', type: 'text', label: 'SKU or part number', admin: { width: '50%' } },
         ],
       },
       { name: 'supplier', type: 'relationship', relationTo: o.suppliers as CollectionSlug, label: 'Supplier' },
+      {
+        name: 'packs',
+        type: 'array',
+        label: 'Packs you buy it in',
+        labels: { singular: 'Pack', plural: 'Packs' },
+        admin: { description: 'For example a "1 kg bag" of 1000 g, or a "box of 100". You can then enter stock in packs. Units of the same kind (kg for g, l for ml) convert by themselves.' },
+        fields: [
+          {
+            type: 'row',
+            fields: [
+              { name: 'name', type: 'text', required: true, label: 'Pack name', admin: { width: '60%' } },
+              { name: 'size', type: 'number', required: true, min: 0.000001, label: 'How many in one', admin: { width: '40%', description: 'In the unit above.' } },
+            ],
+          },
+        ],
+      },
       {
         name: 'openingStock',
         type: 'number',
         virtual: true,
         min: 0,
         label: 'Opening stock',
-        admin: { description: 'How many you have now. After this, stock changes only through movements.', condition: (_d, _s, { operation }) => operation === 'create' },
+        admin: { description: 'How many you have now, in the unit above. After this, stock changes only through movements.', condition: (_d, _s, { operation }) => operation === 'create' },
+      },
+      {
+        type: 'row',
+        admin: { condition: (d, _s, { operation }) => operation === 'create' && Boolean(d?.trackLots) },
+        fields: [
+          { name: 'openingLotNumber', type: 'text', virtual: true, label: 'Lot number of that stock', admin: { width: '50%' } },
+          { name: 'openingExpiresOn', type: 'date', virtual: true, label: 'Use by', admin: { width: '50%', date: { pickerAppearance: 'dayOnly' } } },
+        ],
       },
       {
         name: 'onHand',
@@ -106,6 +155,38 @@ export function itemsCollection(o: ResolvedSupplies): CollectionConfig {
         fields: [
           { name: 'lowStockLevel', type: 'number', min: 0, label: 'Low-stock level', admin: { width: '50%', description: 'One email when on hand falls below this. Empty: no alerts.' } },
           { name: 'reorderQuantity', type: 'number', min: 0, label: 'Reorder quantity', admin: { width: '50%', description: 'What you usually order. Empty: enough to get back to the level.' } },
+        ],
+      },
+      {
+        name: 'wastePercent',
+        type: 'number',
+        min: 0,
+        max: 100,
+        label: 'Waste allowance (%)',
+        admin: {
+          description: 'Added to what recipes use, for spills, spoilage, defects or duds. Empty: the site’s default. 0: none for this item. A recipe can set its own.',
+        },
+      },
+      {
+        type: 'collapsible',
+        label: 'Lots and use-by dates',
+        admin: { initCollapsed: false },
+        fields: [
+          {
+            name: 'trackLots',
+            type: 'checkbox',
+            defaultValue: false,
+            label: 'Track lots',
+            admin: { description: 'Each delivery becomes a lot with its own number and use-by date. The first to expire is used first, and every build records which lots it used.' },
+          },
+          {
+            type: 'row',
+            admin: { condition: (d) => Boolean(d?.trackLots) },
+            fields: [
+              { name: 'shelfLifeDays', type: 'number', min: 0, label: 'Shelf life (days)', admin: { width: '50%', description: 'Sets the use-by date of a delivery when none is given.' } },
+              { name: 'expiryWarningDays', type: 'number', min: 0, label: 'Warn this many days ahead', admin: { width: '50%', description: `Empty: ${o.lotWarningDays}.` } },
+            ],
+          },
         ],
       },
       { name: 'notes', type: 'textarea', label: 'Notes' },
@@ -170,7 +251,7 @@ export function movementsCollection(o: ResolvedSupplies): CollectionConfig {
     labels: { singular: 'Stock movement', plural: 'Stock movements' },
     admin: {
       group: o.adminGroup,
-      defaultColumns: ['createdAt', 'item', 'kind', 'change', 'onHandAfter', 'by', 'reference'],
+      defaultColumns: ['createdAt', 'item', 'kind', 'change', 'lot', 'onHandAfter', 'by', 'reference'],
       description: 'The stock log. Each line is permanent: to fix a mistake, record an adjustment.',
     },
     defaultSort: '-createdAt',
@@ -191,22 +272,60 @@ export function movementsCollection(o: ResolvedSupplies): CollectionConfig {
             options: [
               { label: 'Received (stock in)', value: 'received' },
               { label: 'Used (stock out)', value: 'used' },
-              { label: 'Adjusted (+ or −)', value: 'adjusted' },
+              { label: 'Wasted (spilled, spoiled, expired, a dud)', value: 'wasted' },
+              { label: 'Adjusted (+ or −, for example after a count)', value: 'adjusted' },
             ],
-            admin: { width: '50%' },
+            admin: { width: '40%' },
           },
           {
             name: 'quantity',
             type: 'number',
             required: true,
             label: 'Quantity',
-            admin: { width: '50%', description: 'In the supply’s unit. For an adjustment, type −3 to take 3 away.' },
+            admin: { width: '30%', description: 'For an adjustment, type −3 to take 3 away.' },
+          },
+          {
+            name: 'unit',
+            type: 'text',
+            label: 'Unit',
+            admin: { width: '30%', description: 'Empty: the supply’s own unit. Or kg, l, or one of its packs.' },
           },
         ],
       },
+      {
+        name: 'wasteReason',
+        type: 'select',
+        label: 'Why it was wasted',
+        options: [
+          { label: 'Spilled', value: 'spilled' },
+          { label: 'Spoiled', value: 'spoiled' },
+          { label: 'Expired', value: 'expired' },
+          { label: 'Defective', value: 'defective' },
+          { label: 'A dud', value: 'dud' },
+          { label: 'Other', value: 'other' },
+        ],
+        admin: { condition: (d) => d?.kind === 'wasted' },
+      },
+      {
+        type: 'row',
+        admin: { condition: (d, _s, { operation }) => operation === 'create' && d?.kind === 'received' },
+        fields: [
+          { name: 'lotNumber', type: 'text', virtual: true, label: 'Lot number', admin: { width: '50%', description: 'For supplies with lots tracked.' } },
+          { name: 'expiresOn', type: 'date', virtual: true, label: 'Use by', admin: { width: '50%', date: { pickerAppearance: 'dayOnly' } } },
+        ],
+      },
+      {
+        name: 'lot',
+        type: 'relationship',
+        relationTo: o.lots as CollectionSlug,
+        label: 'Lot',
+        admin: { description: 'Empty: the first to expire that covers it.' },
+        filterOptions: ({ data }) => (idOf(data?.item) === null ? false : { item: { equals: idOf(data.item) } }),
+      },
       { name: 'reason', type: 'text', label: 'Why', admin: { description: 'For example: recount, damaged in shipping, order 1042.' } },
       { name: 'reference', type: 'text', label: 'Reference', admin: { description: 'An order, invoice or batch number.' } },
-      { name: 'change', type: 'number', label: 'Change', admin: { position: 'sidebar', readOnly: true } },
+      { name: 'change', type: 'number', label: 'Change', admin: { position: 'sidebar', readOnly: true, description: 'In the supply’s own unit.' } },
+      { name: 'allowance', type: 'number', label: 'Of which waste allowance', admin: { position: 'sidebar', readOnly: true } },
       { name: 'onHandAfter', type: 'number', label: 'On hand after', admin: { position: 'sidebar', readOnly: true } },
       { name: 'by', type: 'relationship', relationTo: o.userSlug as CollectionSlug, label: 'Recorded by', admin: { position: 'sidebar', readOnly: true } },
       { name: 'recipe', type: 'relationship', relationTo: o.recipes as CollectionSlug, label: 'Recipe', admin: { position: 'sidebar', readOnly: true } },
@@ -263,13 +382,85 @@ export function recipesCollection(o: ResolvedSupplies): CollectionConfig {
           {
             type: 'row',
             fields: [
-              { name: 'item', type: 'relationship', relationTo: o.items as CollectionSlug, required: true, label: 'Supply', admin: { width: '60%' } },
-              { name: 'quantity', type: 'number', required: true, min: 0.000001, label: 'Quantity for one', admin: { width: '40%' } },
+              { name: 'item', type: 'relationship', relationTo: o.items as CollectionSlug, required: true, label: 'Supply', admin: { width: '40%' } },
+              { name: 'quantity', type: 'number', required: true, min: 0.000001, label: 'Quantity for one', admin: { width: '20%' } },
+              { name: 'unit', type: 'text', label: 'Unit', admin: { width: '20%', description: 'Empty: the supply’s unit.' } },
+              { name: 'wastePercent', type: 'number', min: 0, max: 100, label: 'Waste %', admin: { width: '20%', description: 'Empty: the recipe’s or supply’s.' } },
             ],
           },
           { name: 'note', type: 'text', label: 'Note' },
         ],
       },
+      {
+        name: 'wastePercent',
+        type: 'number',
+        min: 0,
+        max: 100,
+        label: 'Waste allowance (%)',
+        admin: { position: 'sidebar', description: 'For every supply in this recipe, for example a kit failure rate. Empty: each supply’s own.' },
+      },
+      { name: 'notes', type: 'textarea', label: 'Notes' },
+    ],
+  }
+}
+
+export function lotsCollection(o: ResolvedSupplies): CollectionConfig {
+  const beforeChange: CollectionBeforeChangeHook = async ({ data, originalDoc, operation, req }) => {
+    const internal = req.context?.[INTERNAL]
+    const itemID = idOf(data.item ?? originalDoc?.item)
+    const item = itemID === null ? null : ((await req.payload.findByID({ collection: o.items as CollectionSlug, id: itemID, ...sys, disableErrors: true, req })) as Doc | null)
+    if (!item) throw new KittingError('itemRequired', 'Choose a supply.')
+    if (operation === 'update' && !sameID(item.id, originalDoc?.item)) throw new KittingError('lot', 'A lot can’t move to another supply.')
+    if (!internal) data.onHand = operation === 'create' ? 0 : (originalDoc?.onHand ?? 0)
+    if (o.scopeField) data[o.scopeField] = idOf(item[o.scopeField])
+    const lotNumber = data.lotNumber !== undefined ? data.lotNumber : originalDoc?.lotNumber
+    data.lotNumber = lotNumber ? String(lotNumber).trim() : null
+    if (data.lotNumber) {
+      const clash = await req.payload.find({
+        collection: o.lots as CollectionSlug,
+        where: { and: [{ item: { equals: item.id } }, { lotNumber: { equals: data.lotNumber } }, ...(originalDoc?.id ? [{ id: { not_equals: originalDoc.id } }] : [])] },
+        limit: 1,
+        pagination: false,
+        ...sys,
+        req,
+      })
+      if (clash.docs.length) throw new KittingError('lotTaken', `${item.name} already has a lot ${data.lotNumber}.`)
+    }
+    const expiresOn = data.expiresOn !== undefined ? data.expiresOn : originalDoc?.expiresOn
+    const received = data.receivedOn ?? originalDoc?.receivedOn ?? new Date().toISOString()
+    data.receivedOn = received
+    data.label = [data.lotNumber ? `Lot ${data.lotNumber}` : `Received ${String(received).slice(0, 10)}`, expiresOn ? `use by ${String(expiresOn).slice(0, 10)}` : null].filter(Boolean).join(' · ')
+    return data
+  }
+  const beforeDelete: CollectionBeforeDeleteHook = async ({ id, req }) => {
+    if (req.context?.[ALLOW_DELETE]) return
+    const used = await req.payload.count({ collection: o.movements as CollectionSlug, where: { lot: { equals: id } }, overrideAccess: true, req })
+    if (used.totalDocs) throw new KittingError('hasHistory', 'This lot has stock history, so it can’t be deleted.')
+  }
+  return {
+    slug: o.lots,
+    labels: { singular: 'Lot', plural: 'Lots' },
+    admin: {
+      group: o.adminGroup,
+      useAsTitle: 'label',
+      defaultColumns: ['label', 'item', 'onHand', 'expiresOn'],
+      description: 'Deliveries of supplies with lots tracked. Made when stock is received; the first to expire is used first.',
+    },
+    defaultSort: 'expiresOn',
+    access: { read: o.read, create: o.manage, update: o.manage, delete: o.manage },
+    hooks: { beforeChange: [beforeChange], beforeDelete: [beforeDelete] },
+    fields: [
+      { name: 'item', type: 'relationship', relationTo: o.items as CollectionSlug, required: true, label: 'Supply' },
+      {
+        type: 'row',
+        fields: [
+          { name: 'lotNumber', type: 'text', label: 'Lot number', admin: { width: '50%' } },
+          { name: 'expiresOn', type: 'date', label: 'Use by', admin: { width: '50%', date: { pickerAppearance: 'dayOnly' } } },
+        ],
+      },
+      { name: 'onHand', type: 'number', defaultValue: 0, label: 'On hand', admin: { readOnly: true, description: 'Changes only through stock movements.' } },
+      { name: 'receivedOn', type: 'date', label: 'Received', admin: { position: 'sidebar', date: { pickerAppearance: 'dayAndTime' } } },
+      { name: 'label', type: 'text', label: 'Label', admin: { hidden: true } },
       { name: 'notes', type: 'textarea', label: 'Notes' },
     ],
   }

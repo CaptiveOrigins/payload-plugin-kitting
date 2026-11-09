@@ -1,7 +1,9 @@
 import type { Access, CollectionConfig, Config, Plugin } from 'payload'
 
-import { itemsCollection, movementsCollection, recipesCollection, suppliersCollection } from './collections.js'
+import { itemsCollection, lotsCollection, movementsCollection, recipesCollection, suppliersCollection } from './collections.js'
 import type { ResolvedSupplies, KittingPluginOptions } from './types.js'
+
+const clampPercent = (n: unknown) => (typeof n === 'number' && Number.isFinite(n) ? Math.min(Math.max(n, 0), 100) : 0)
 
 /**
  * Supplies: items, suppliers, an append-only stock log, recipes that use stock in one transaction,
@@ -17,6 +19,7 @@ export const kittingPlugin =
       suppliers: options.slugs?.suppliers ?? 'suppliers',
       movements: options.slugs?.movements ?? 'supply-movements',
       recipes: options.slugs?.recipes ?? 'supply-recipes',
+      lots: options.slugs?.lots ?? 'supply-lots',
       userSlug,
       read: options.access?.read ?? options.access?.manage ?? signedIn,
       manage: options.access?.manage ?? signedIn,
@@ -28,6 +31,9 @@ export const kittingPlugin =
       render: options.alerts?.render,
       adminView: options.adminView ?? true,
       adminGroup: options.adminGroup ?? 'Supplies',
+      waste: { enabled: options.waste?.enabled ?? true, defaultPercent: clampPercent(options.waste?.defaultPercent) },
+      lotWarningDays: options.lots?.warningDays ?? 14,
+      autoWriteOff: options.lots?.autoWriteOff ?? true,
     }
     const ov = options.overrides ?? {}
     const apply = (c: CollectionConfig, f?: (c: CollectionConfig) => CollectionConfig) => (f ? f(c) : c)
@@ -36,6 +42,7 @@ export const kittingPlugin =
       apply(suppliersCollection(o), ov.suppliers),
       apply(movementsCollection(o), ov.movements),
       apply(recipesCollection(o), ov.recipes),
+      apply(lotsCollection(o), ov.lots),
     ]
     const components = config.admin?.components ?? {}
     return {

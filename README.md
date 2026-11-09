@@ -4,7 +4,7 @@ Kitting for [Payload](https://payloadcms.com): anyone from a café to a genomics
 
 It's meant for people with no IT department. You set it up once and carefully, with every item and a recipe for everything you make, down to the gram or the microlitre. From then on it knows how much of everything you need.
 
-**Status: 0.1.0, not on npm yet. Only level 1 and part of level 2 exist so far.** Most of what's described below is planned, and each item says so.
+**Status: 0.1.0, not on npm yet. Level 1 is built; level 2 is partly built.** Most of what's described below is planned, and each item says so.
 
 ## Two examples
 
@@ -23,35 +23,37 @@ The same few words cover both: an **item** is anything you keep in stock, a **re
 
 You switch on only what you need, and the simple case stays simple:
 
-1. **Supply tracker.** Items, suppliers, a stock log and low-stock email. Nothing else. *Built.*
+1. **Supply tracker.** Items in any unit, suppliers, lots and use-by dates, a stock log, the waste allowance and low-stock email. Nothing else. *Built.*
 2. **Recipes and builder.** Recipes and `applyRecipe` are built. *Planned:* a builder in the admin where you scan or type each unit's external ID and its items are taken off automatically, recording the lots used; recipes that use other recipes.
 3. **Fulfilment.** *Planned:* ready units assigned to orders (natively with Payload's ecommerce plugin, or through Kitting's own API), a "build one" queue, a recommended ready-stock level learned from your sales, and box suggestions by cost, using real postage when a shipping plugin is installed.
 
 Today levels 1 and 2 are always on together; the switches come with the builder.
 
-## Planned for every level
+## Built into every level
 
-- **Waste allowance.** Spills, spoilage, defects, failures and duds happen. Each item and recipe can carry a loss allowance in %, shown plainly ("18 g of beans per drink + 5% waste allowance"). It can be switched off for the whole site and overridden per item. Optionally, Kitting suggests the % from the corrections you've recorded.
-- **Units.** Buy in one unit and use in another: a 1 kg bag used 18 g at a time, a litre of buffer used 500 µl at a time, packs of 100 used one by one. You set each conversion once.
-- **Lots and use-by dates** (optional): a lot number and shelf life per delivery, warnings before things expire, and the first to expire used first. Every build records which lots it used, so a bad lot can be traced to the units it went into. Expired stock is written off and counts as waste.
-- **Getting started and everyday use.** A guided setup (your items, then your recipes, then a first stock count), and an everyday page: what's low, what to make, what to buy. Plain wording, for a shop owner or a lab manager, not an engineer.
+- **Waste allowance.** Spills, spoilage, defects, failures and duds happen. Each item, recipe and recipe line can carry a loss allowance in %, added to what a recipe uses and recorded on each movement ("18 g of beans per drink + 5% waste allowance"). The most specific wins: line, then recipe, then item, then the site default. `waste: { enabled: false }` turns them all off, and 0 turns one off. `suggestWastePercent` suggests an item's % from what happened over the last 90 days: the allowance taken, plus recorded waste, minus what counts found extra, as a share of what recipes used. It needs 10 recipe uses first, and says so until then.
+- **Units.** Each item is counted in one unit (g, ml, µl, each…). Enter stock in any unit of the same kind (kg for g, l for µl) or in one of the item's packs ("1 kg bag" = 1000 g), and it's converted once on the way in. Recipe lines can use other units too.
+- **Lots and use-by dates** (per item, "Track lots"). Each delivery becomes a lot with its own number and use-by date, or one worked out from the item's shelf life. Stock is used first to expire first, and expired lots are never used. Every movement records its lot. Expired lots are written off as waste (`writeOffExpired`, and automatically when the overview opens). The overview lists what to use soon.
+
+*Planned:* a guided setup (your items, then your recipes, then a first stock count), and an everyday page (what's low, what to make, what to buy) in plain wording for a shop owner or a lab manager.
 
 Later, not yet: ordering from suppliers when something stays low for a few days (see [docs/roadmap.md](docs/roadmap.md)), and turning till sales into usage.
 
-**Testing so far:** 16 tests pass against a real MongoDB (in memory, single-node replica set) on Payload 3.92: movements, recipes, the refusal to go below zero, the low-stock email firing once, two senders racing for one alert, site isolation and access. The overview at `/admin/supplies` was checked in a local dev server of a real host app with made-up data: it renders, its headings and tables are in order, and its text and buttons measured 15:1 contrast or better in dark mode. It hasn't been tried by a person, with a keyboard or a screen reader.
+**Testing so far:** 26 tests pass, 6 of them pure unit tests and the rest against a real MongoDB (in memory, single-node replica set) on Payload 3.92: movements, units and packs, the waste allowance and its suggestion, lots used first to expire first with expired ones written off, recipes, the refusal to go below zero, the low-stock email firing once, two senders racing for one alert, site isolation and access. The overview at `/admin/supplies` was checked in a local dev server of a real host app with made-up data: it renders, its headings and tables are in order, and its text and buttons measured 15:1 contrast or better in dark mode. It hasn't been tried by a person, with a keyboard or a screen reader.
 
 ## What it does
 
 - **Supplies** (`supply-items`): name, unit (each, g, ml…), SKU, supplier, on hand, low-stock level, reorder quantity, notes. You give the opening stock when you add one.
 - **Suppliers**: name, order email, phone, website, usual delivery time, notes.
-- **Stock movements** (`supply-movements`): the stock log. Received, used, or adjusted (+ or −), with who, why and a reference. A movement can't be edited or deleted, even through the Local API: you fix a mistake with an adjustment. On hand is only ever changed by a movement, so it always equals the sum of the item's log, opening stock included.
+- **Lots** (`supply-lots`): for items with lots tracked, one per delivery, with its number, use-by date and what's left. Made when stock is received.
+- **Stock movements** (`supply-movements`): the stock log. Received, used, wasted (spilled, spoiled, expired, defective, a dud) or adjusted (+ or −), with who, why, a reference and the lot. A movement can't be edited or deleted, even through the Local API: you fix a mistake with an adjustment. On hand is only ever changed by a movement, so it always equals the sum of the item's log, opening stock included.
 - **Recipes** (`supply-recipes`): what goes into one of something, as supplies × quantity. Your code calls `applyRecipe` when it makes something, and the plugin writes one `used` movement per supply, in one transaction.
 - **Going below zero** is refused by default. Nothing is written, and the error names every supply that's short and by how much. Set `negativeStock: 'warn'` to let it through and get the shortages back instead.
 - **Low-stock email**: when a supply drops below its level, one email goes to the addresses you set. No more about that supply until it's back at or above the level. If your site has email off, the alert is recorded as not sent, and it isn't sent later.
 - **Overview** at `/admin/supplies`: what's below level, grouped by supplier with their contact details and a suggested reorder (the reorder quantity, or enough to get back to the level if that's more), then every supply.
 - **Sites**: with `scopeField` (for example `tenant` from Payload's multi-tenant plugin), every link stays inside one site. A recipe can't use another site's supplies, a movement takes its site from its supply, and recipe keys are unique per site.
 
-It doesn't do purchase orders, costs or prices, or barcode scanning.
+It doesn't do purchase orders, costs or prices yet.
 
 ## Install
 
@@ -113,11 +115,15 @@ With `scopeField`, a recipe key needs its site: `{ key, scope }`. `{ id }` works
 
 | Option | Default | |
 |---|---|---|
-| `slugs` | `supply-items`, `suppliers`, `supply-movements`, `supply-recipes` | |
+| `slugs` | `supply-items`, `suppliers`, `supply-movements`, `supply-recipes`, `supply-lots` | |
 | `access.manage` | signed-in admin users | Add and edit supplies, suppliers and recipes, and record movements. May return a query |
 | `access.read` | same as `manage` | See them |
 | `scopeField` | none | The field that separates sites, such as `tenant`. Your tenant plugin adds it |
 | `negativeStock` | `'refuse'` | Or `'warn'`. `applyRecipe` can override it per call |
+| `waste.enabled` | `true` | `false` turns every waste allowance off |
+| `waste.defaultPercent` | `0` | For items without their own |
+| `lots.warningDays` | `14` | How soon before its use-by date a lot shows under "Use soon". Items can set their own |
+| `lots.autoWriteOff` | `true` | Write off expired lots when the overview opens |
 | `alerts.recipients` | none | A list, or `({ payload, item }) => string[]` (`item.scope` is the site) |
 | `alerts.canSend` | always | Return false where email is off, for example in development |
 | `alerts.sendEmail` | `payload.sendEmail` | Your own delivery |
@@ -133,6 +139,9 @@ Movements can't be edited or deleted whatever `access` says. A trusted cleanup s
 - Alerts are only as exact as your database's transactions. On MongoDB they need a replica set, which Atlas always has. Without transactions, two saves at the same moment could both read the same stock.
 - When an admin records a movement, the email goes out at the end of the save, just before it's committed. If that final commit fails, an email can arrive for a change that didn't stick.
 - Quantities can be fractional and are rounded to six decimal places.
+- A lot's use-by date is a day; the whole day is usable, and it's compared in UTC.
+- With an allowance on, everyday spills are covered by it: record waste only for the unusual (a dropped bag, a failed batch), or it's counted twice until the next count corrects it.
+- Waste allowances are set in config and on each item and recipe. A site-wide setting in the admin is planned.
 
 ## Development
 

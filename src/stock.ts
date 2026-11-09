@@ -1,5 +1,6 @@
 import { APIError, type CollectionSlug, type Payload, type PayloadRequest, type Where } from 'payload'
 
+import { conversionFactor, normalizeUnit, unitsFor } from './units.js'
 import type { AlertItem, AlertStatus, ApplyRecipeContext, ApplyRecipeResult, ID, NegativeStock, RecipeRef, ResolvedSupplies, Shortage } from './types.js'
 
 type Doc = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -13,7 +14,7 @@ export const INTERNAL = 'kittingInternal'
  */
 export const ALLOW_DELETE = 'kittingAllowDelete'
 
-export type Internal = { by?: ID | null; negativeStock?: NegativeStock; opening?: boolean; recipe?: ID; count?: number }
+export type Internal = { by?: ID | null; negativeStock?: NegativeStock; opening?: boolean; recipe?: ID; count?: number; allowance?: number }
 
 export const suppliesOf = (payload: Payload): ResolvedSupplies => {
   const o = payload.config.custom?.kitting as ResolvedSupplies | undefined
@@ -109,10 +110,147 @@ async function findRecipe(payload: Payload, o: ResolvedSupplies, req: Req, ref: 
   return found
 }
 
+const getItem = async (payload: Payload, o: ResolvedSupplies, req: Req, id: unknown) =>
+  idOf(id) === null ? null : ((await payload.findByID({ collection: o.items as CollectionSlug, id: idOf(id)!, ...sys, joins: false, disableErrors: true, req })) as Doc | null)
+
+// ---------------------------------------------------------------------------------------------
+// Waste allowance
+
+const percentOf = (v: unknown) => (num(v) === null ? null : Math.min(Math.max(v as number, 0), 100))
+
+/**
+ * The waste allowance % that applies: the recipe line's own, else the recipe's, else the item's,
+ * else the plugin's default. Zero when allowances are switched off.
+ */
+export function wastePercent(o: Pick<ResolvedSupplies, 'waste'>, item: Doc, recipe?: Doc | null, line?: Doc | null): number {
+  if (!o.waste.enabled) return 0
+  return percentOf(line?.wastePercent) ?? percentOf(recipe?.wastePercent) ?? percentOf(item.wastePercent) ?? o.waste.defaultPercent
+}
+
+/** "18 g of Beans + 5% waste allowance": a recipe line in plain words. */
+export function describeUse(args: { quantity: number; unit: string; name: string; percent: number; per?: string }) {
+  const base = `${fmt(args.quantity)} ${args.unit} of ${args.name}${args.per ? ` per ${args.per}` : ''}`
+  return args.percent > 0 ? `${base} + ${fmt(args.percent)}% waste allowance` : base
+}
+
+const fmt = (n: number) => String(round(n))
+
+// ---------------------------------------------------------------------------------------------
+// Lots and use-by dates
+
+const DAY = 24 * 60 * 60 * 1000
+
+/** A lot is expired once its use-by day has passed (the whole day is still usable). */
+export const isExpired = (expiresOn: unknown, now = new Date()) => {
+  if (!expiresOn) return false
+  const t = new Date(String(expiresOn)).getTime()
+  return Number.isFinite(t) && now.getTime() >= startOfDayUTC(t) + DAY
+}
+export const expiresWithin = (expiresOn: unknown, days: number, now = new Date()) => {
+  if (!expiresOn || isExpired(expiresOn, now)) return false
+  const t = new Date(String(expiresOn)).getTime()
+  return Number.isFinite(t) && startOfDayUTC(t) + DAY - now.getTime() <= days * DAY
+}
+const startOfDayUTC = (t: number) => {
+  const d = new Date(t)
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
+}
+const dateOnly = (d: Date) => new Date(startOfDayUTC(d.getTime())).toISOString()
+
+/** First to expire first; lots without a date after dated ones; then oldest received. */
+export const byExpiry = (a: Doc, b: Doc) => {
+  const ea = a.expiresOn ? new Date(a.expiresOn).getTime() : Infinity
+  const eb = b.expiresOn ? new Date(b.expiresOn).getTime() : Infinity
+  if (ea !== eb) return ea - eb
+  return String(a.receivedOn ?? a.createdAt ?? '').localeCompare(String(b.receivedOn ?? b.createdAt ?? ''))
+}
+
+export async function lotsOf(payload: Payload, o: ResolvedSupplies, req: Req, itemID: ID): Promise<Doc[]> {
+  const docs = (await payload.find({ collection: o.lots as CollectionSlug, where: { item: { equals: itemID } }, ...list, req })).docs as Doc[]
+  return docs.sort(byExpiry)
+}
+
+const lotName = (lot: Doc) => (lot.lotNumber ? `lot ${lot.lotNumber}` : `the lot received ${String(lot.receivedOn ?? lot.createdAt ?? '').slice(0, 10)}`)
+
+async function createLot(payload: Payload, o: ResolvedSupplies, req: Req, item: Doc, lotNumber: unknown, expiresOn: unknown): Promise<Doc> {
+  const now = new Date()
+  const shelf = num(item.shelfLifeDays)
+  const expiry = expiresOn ? String(expiresOn) : shelf !== null ? dateOnly(new Date(now.getTime() + shelf * DAY)) : null
+  return (await asInternal(req, {}, () =>
+    payload.create({
+      collection: o.lots as CollectionSlug,
+      data: {
+        item: item.id,
+        lotNumber: lotNumber ? String(lotNumber).trim() : null,
+        expiresOn: expiry,
+        receivedOn: now.toISOString(),
+        onHand: 0,
+        ...(o.scopeField ? { [o.scopeField]: idOf(item[o.scopeField]) } : {}),
+      } as never,
+      ...sys,
+      req,
+    }),
+  )) as Doc
+}
+
+/** Usable stock of an item: unexpired lots, plus any stock from before lots were tracked. */
+function usable(item: Doc, lots: Doc[], now = new Date()) {
+  const fresh = lots.filter((l) => !isExpired(l.expiresOn, now) && (num(l.onHand) ?? 0) > 0)
+  const inLots = round(lots.reduce((t, l) => t + Math.max(num(l.onHand) ?? 0, 0), 0))
+  const unlotted = Math.max(round((num(item.onHand) ?? 0) - inLots), 0)
+  return { fresh, unlotted, total: round(fresh.reduce((t, l) => t + (num(l.onHand) as number), 0) + unlotted) }
+}
+
+/**
+ * Take `quantity` from an item, first to expire first, skipping expired lots. Stock from before lots
+ * were tracked goes last. Anything left over (a shortage) comes back with no lot.
+ */
+export function allocate(item: Doc, lots: Doc[], quantity: number, now = new Date()): { lot: ID | null; quantity: number }[] {
+  if (!item.trackLots) return [{ lot: null, quantity }]
+  const { fresh } = usable(item, lots, now)
+  const out: { lot: ID | null; quantity: number }[] = []
+  let left = quantity
+  for (const lot of fresh) {
+    if (left <= 0) break
+    const take = Math.min(num(lot.onHand) as number, left)
+    out.push({ lot: lot.id, quantity: round(take) })
+    left = round(left - take)
+  }
+  // What's left comes from stock from before lots were tracked, or is a shortage: either way, no lot.
+  if (left > 0) out.push({ lot: null, quantity: left })
+  return out.filter((p) => p.quantity > 0)
+}
+
+// ---------------------------------------------------------------------------------------------
+// Using a recipe
+
+type Need = { item: Doc; base: number; allowance: number; percent: number }
+
+/** What `count` of a recipe takes from each item, in the item's unit, with the waste allowance. */
+async function planRecipe(payload: Payload, o: ResolvedSupplies, req: Req, r: Doc, count: number): Promise<Map<string, Need>> {
+  const needs = new Map<string, Need>()
+  for (const line of (r.lines ?? []) as Doc[]) {
+    const quantity = num(line.quantity)
+    if (idOf(line.item) === null || quantity === null || quantity <= 0) continue
+    const item = await getItem(payload, o, req, line.item)
+    if (!item) throw new KittingError('itemNotFound', `A supply in "${r.name}" no longer exists. Edit the recipe.`)
+    if (o.scopeField && !sameID(item[o.scopeField], r[o.scopeField])) throw new KittingError('scope', `"${nameOf(item)}" belongs somewhere else than the recipe "${r.name}".`)
+    const factor = conversionFactor(line.unit || item.unit, item.unit, item.packs ?? [])
+    if (factor === null) throw new KittingError('unit', `"${r.name}" uses ${nameOf(item)} in ${line.unit}, which can’t be converted to ${unitOf(item)}.`)
+    const base = round(quantity * factor * count)
+    const percent = wastePercent(o, item, r, line)
+    const allowance = round((base * percent) / 100)
+    const prev = needs.get(String(item.id))
+    needs.set(String(item.id), { item, base: round((prev?.base ?? 0) + base), allowance: round((prev?.allowance ?? 0) + allowance), percent })
+  }
+  return needs
+}
+
 /**
  * Use a recipe's supplies to make `count` of something, in one transaction: one `used` movement per
- * item, or nothing at all. Refuses when any item would go below zero (unless `negativeStock` is
- * `warn`), naming every item that's short.
+ * item and lot (first to expire first), or nothing at all. Each item's waste allowance is added and
+ * recorded on the movement. Refuses when any item hasn't enough usable stock (unless `negativeStock`
+ * is `warn`), naming every item that's short.
  */
 export async function applyRecipe(payload: Payload, recipe: RecipeRef, count: number, context: ApplyRecipeContext = {}): Promise<ApplyRecipeResult> {
   const o = suppliesOf(payload)
@@ -122,55 +260,67 @@ export async function applyRecipe(payload: Payload, recipe: RecipeRef, count: nu
   const result = await transaction(payload, context.req, async (req) => {
     const r = await findRecipe(payload, o, req, recipe, context.scope)
     if (r.active === false) throw new KittingError('recipeInactive', `The recipe "${r.name}" is switched off.`)
-    const totals = new Map<string, { id: ID; quantity: number }>()
-    for (const line of (r.lines ?? []) as Doc[]) {
-      const id = idOf(line.item)
-      const quantity = num(line.quantity)
-      if (id === null || quantity === null || quantity <= 0) continue
-      const prev = totals.get(String(id))
-      totals.set(String(id), { id, quantity: round((prev?.quantity ?? 0) + quantity * count) })
-    }
-    if (!totals.size) throw new KittingError('recipeEmpty', `The recipe "${r.name}" has no supplies in it.`)
-
-    const items: Doc[] = []
-    for (const { id } of totals.values()) {
-      const item = (await payload.findByID({ collection: o.items as CollectionSlug, id, ...sys, joins: false, disableErrors: true, req })) as Doc | null
-      if (!item) throw new KittingError('itemNotFound', `A supply in "${r.name}" no longer exists. Edit the recipe.`)
-      if (o.scopeField && !sameID(item[o.scopeField], r[o.scopeField])) throw new KittingError('scope', `"${nameOf(item)}" belongs somewhere else than the recipe "${r.name}".`)
-      items.push(item)
-    }
-    const shortages: Shortage[] = items.flatMap((item) => {
-      const needed = totals.get(String(item.id))!.quantity
-      const onHand = num(item.onHand) ?? 0
-      return onHand - needed < 0 ? [{ item: item.id as ID, name: nameOf(item), unit: unitOf(item), onHand, needed, short: round(needed - onHand) }] : []
+    const needs = await planRecipe(payload, o, req, r, count)
+    if (!needs.size) throw new KittingError('recipeEmpty', `The recipe "${r.name}" has no supplies in it.`)
+    const used = await useNeeds(payload, o, req, [...needs.values()], {
+      policy,
+      what: `make ${count} with "${r.name}"`,
+      by: idOf(context.user ?? req.user ?? null),
+      recipe: r.id,
+      count,
+      reference: context.reference ?? null,
+      reason: context.reason ?? `Used by recipe "${r.name}" × ${count}`,
     })
-    if (shortages.length && policy === 'refuse')
-      throw new KittingError(
-        'notEnoughStock',
-        `Not enough to make ${count} with "${r.name}": ` + shortages.map((s) => `${s.name} has ${plural(s.onHand, s.unit)}, needs ${plural(s.needed, s.unit)}`).join('; ') + '.',
-        shortages,
-      )
-
-    const by = idOf(context.user ?? req.user ?? null)
-    const movements: ApplyRecipeResult['movements'] = []
-    for (const item of items) {
-      const quantity = totals.get(String(item.id))!.quantity
-      const doc = (await asInternal(req, { by, negativeStock: policy, recipe: r.id, count }, () =>
-        payload.create({
-          collection: o.movements as CollectionSlug,
-          data: { item: item.id, kind: 'used', quantity, reference: context.reference ?? null, reason: context.reason ?? `Used by recipe "${r.name}" × ${count}` } as never,
-          ...sys,
-          req,
-        }),
-      )) as Doc
-      movements.push({ id: doc.id, item: item.id, change: doc.change, onHandAfter: doc.onHandAfter })
-    }
-    return { recipe: { id: r.id as ID, name: String(r.name) }, count, movements, shortages }
+    return { recipe: { id: r.id as ID, name: String(r.name) }, count, ...used }
   })
   // Our own transaction is committed: send the alert now. A caller's transaction isn't, so the
   // alert stays pending until they call sendPendingAlerts, or the next save sends it.
   if (!joined) await sendPendingAlerts(payload).catch((error) => payload.logger.error({ err: error, msg: 'kitting: low-stock alerts not sent' }))
   return result
+}
+
+/** Check every need against usable stock, then write the movements (one per item and lot). */
+export async function useNeeds(
+  payload: Payload,
+  o: ResolvedSupplies,
+  req: Req,
+  needs: Need[],
+  args: { policy: NegativeStock; what: string; by: ID | null; recipe?: ID; count?: number; reference: string | null; reason: string },
+): Promise<{ movements: ApplyRecipeResult['movements']; shortages: Shortage[]; lots: Map<string, { lot: ID | null; quantity: number }[]> }> {
+  const plans: { need: Need; parts: { lot: ID | null; quantity: number }[] }[] = []
+  const shortages: Shortage[] = []
+  for (const need of needs) {
+    const lots = need.item.trackLots ? await lotsOf(payload, o, req, need.item.id) : []
+    const total = round(need.base + need.allowance)
+    const available = need.item.trackLots ? usable(need.item, lots).total : (num(need.item.onHand) ?? 0)
+    if (total > available) shortages.push({ item: need.item.id, name: nameOf(need.item), unit: unitOf(need.item), onHand: available, needed: total, short: round(total - available) })
+    plans.push({ need, parts: allocate(need.item, lots, total) })
+  }
+  if (shortages.length && args.policy === 'refuse')
+    throw new KittingError(
+      'notEnoughStock',
+      `Not enough to ${args.what}: ` + shortages.map((s) => `${s.name} has ${plural(s.onHand, s.unit)}, needs ${plural(s.needed, s.unit)}`).join('; ') + '.',
+      shortages,
+    )
+  const movements: ApplyRecipeResult['movements'] = []
+  const lotsUsed = new Map<string, { lot: ID | null; quantity: number }[]>()
+  for (const { need, parts } of plans) {
+    const total = round(need.base + need.allowance)
+    lotsUsed.set(String(need.item.id), parts)
+    for (const part of parts) {
+      const allowance = total > 0 ? round((need.allowance * part.quantity) / total) : 0
+      const doc = (await asInternal(req, { by: args.by, negativeStock: args.policy, recipe: args.recipe, count: args.count, allowance }, () =>
+        payload.create({
+          collection: o.movements as CollectionSlug,
+          data: { item: need.item.id, kind: 'used', quantity: part.quantity, unit: unitOf(need.item), lot: part.lot, reference: args.reference, reason: args.reason } as never,
+          ...sys,
+          req,
+        }),
+      )) as Doc
+      movements.push({ id: doc.id, item: need.item.id, lot: part.lot, change: doc.change, allowance, onHandAfter: doc.onHandAfter })
+    }
+  }
+  return { movements, shortages, lots: lotsUsed }
 }
 
 /** Does `manage` let this person change the item? A query result must match the item. */
@@ -182,27 +332,38 @@ export async function mayManage(req: PayloadRequest, o: ResolvedSupplies, itemID
   return found.totalDocs > 0
 }
 
-/** The movement hook: works out the change, refuses going below zero, records who. */
+const KINDS = ['received', 'used', 'adjusted', 'wasted']
+
+/**
+ * The movement hook: converts the entered unit to the item's, works out the change, picks or makes
+ * the lot, refuses going below zero, records who.
+ */
 export async function prepareMovement(req: PayloadRequest, data: Doc): Promise<Doc> {
   const payload = req.payload
   const o = suppliesOf(payload)
   const internal = req.context?.[INTERNAL] as Internal | undefined
-  const item = (await payload.findByID({ collection: o.items as CollectionSlug, id: idOf(data.item)!, ...sys, joins: false, disableErrors: true, req })) as Doc | null
+  const item = await getItem(payload, o, req, data.item)
   if (!item) throw new KittingError('itemNotFound', 'Choose a supply.')
   // A movement takes its owner from the item, so the person must be able to manage that item.
   if (!internal && req.user && !(await mayManage(req, o, item.id))) throw new KittingError('forbidden', 'You can’t record stock for that supply.')
   const onHand = num(item.onHand) ?? 0
+  const unit = normalizeUnit(data.unit || item.unit) || unitOf(item)
+  const factor = conversionFactor(unit, item.unit, item.packs ?? [])
+  if (factor === null)
+    throw new KittingError('unit', `${nameOf(item)} is counted in ${unitOf(item)}. Use one of: ${unitsFor(item.unit, item.packs ?? []).join(', ')}.`)
   const quantity = num(data.quantity)
   let change: number
   if (internal?.opening) {
     change = onHand
-  } else if (data.kind === 'received' || data.kind === 'used') {
-    if (quantity === null || quantity <= 0) throw new KittingError('quantity', 'The quantity is more than zero.')
-    change = data.kind === 'received' ? quantity : -quantity
+  } else if (!KINDS.includes(data.kind)) {
+    throw new KittingError('kind', 'Choose received, used, wasted or adjusted.')
   } else if (data.kind === 'adjusted') {
     if (quantity === null || quantity === 0) throw new KittingError('quantity', 'An adjustment adds (+) or takes away (−) something: it can’t be zero.')
-    change = quantity
-  } else throw new KittingError('kind', 'Choose received, used or adjusted.')
+    change = quantity * factor
+  } else {
+    if (quantity === null || quantity <= 0) throw new KittingError('quantity', 'The quantity is more than zero.')
+    change = data.kind === 'received' ? quantity * factor : -quantity * factor
+  }
   change = round(change)
   const after = internal?.opening ? onHand : round(onHand + change)
   const policy = internal?.negativeStock ?? o.negativeStock
@@ -210,20 +371,61 @@ export async function prepareMovement(req: PayloadRequest, data: Doc): Promise<D
     throw new KittingError('notEnoughStock', `Not enough ${nameOf(item)}: ${plural(onHand, unitOf(item))} on hand, this would leave ${plural(after, unitOf(item))}.`, [
       { item: item.id, name: nameOf(item), unit: unitOf(item), onHand, needed: -change, short: round(-after) },
     ])
-  const out: Doc = { ...data, change, onHandAfter: after, by: internal ? (internal.by ?? null) : req.user && req.user.collection === o.userSlug ? req.user.id : null }
-  // Only the plugin links a movement to a recipe.
+
+  // Lots: stock in goes into a lot (given, found by number, or new); stock out comes from one.
+  let lot: Doc | null = null
+  if (item.trackLots) {
+    const lots = await lotsOf(payload, o, req, item.id)
+    const given = idOf(data.lot)
+    if (given !== null) {
+      lot = lots.find((l) => sameID(l.id, given)) ?? null
+      if (!lot) throw new KittingError('lot', `That lot isn’t a lot of ${nameOf(item)}.`)
+    } else if (change > 0 && data.lotNumber) {
+      lot = lots.find((l) => String(l.lotNumber ?? '') === String(data.lotNumber).trim()) ?? (await createLot(payload, o, req, item, data.lotNumber, data.expiresOn))
+    } else if (change > 0 && (data.kind === 'received' || internal?.opening)) {
+      lot = await createLot(payload, o, req, item, null, data.expiresOn)
+    } else if (change > 0) {
+      lot = lots.at(-1) ?? (await createLot(payload, o, req, item, null, data.expiresOn))
+    } else if (change < 0 && !internal) {
+      // By hand: the first-to-expire lot that covers it. Several lots: record one movement per lot.
+      const { fresh } = usable(item, lots)
+      lot = fresh.find((l) => (num(l.onHand) as number) >= -change) ?? null
+      if (!lot && fresh.length)
+        throw new KittingError(
+          'lot',
+          `No single lot of ${nameOf(item)} has ${plural(-change, unitOf(item))}. Record it lot by lot: ` +
+            fresh.map((l) => `${lotName(l)} has ${plural(num(l.onHand) as number, unitOf(item))}`).join('; ') +
+            '.',
+        )
+    }
+    if (lot && change < 0 && !internal && (num(lot.onHand) ?? 0) + change < 0 && policy === 'refuse')
+      throw new KittingError('notEnoughStock', `${lotName(lot)} of ${nameOf(item)} has only ${plural(num(lot.onHand) ?? 0, unitOf(item))}.`)
+  }
+
+  const out: Doc = { ...data, unit, change, onHandAfter: after, lot: lot?.id ?? null, by: internal ? (internal.by ?? null) : req.user && req.user.collection === o.userSlug ? req.user.id : null }
+  delete out.lotNumber
+  delete out.expiresOn
+  out.wasteReason = data.kind === 'wasted' ? data.wasteReason || 'other' : null
+  // Only the plugin links a movement to a recipe or records a waste allowance.
   out.recipe = internal?.recipe ?? null
   out.count = internal?.count ?? null
+  out.allowance = internal?.allowance ?? 0
   if (internal?.opening) out.kind = 'adjusted'
   if (o.scopeField) out[o.scopeField] = idOf(item[o.scopeField])
   return out
 }
 
-/** After a movement is saved: bring the item's on hand and alert state in line, in the same transaction. */
+/** After a movement is saved: bring the item's (and lot's) on hand and alert state in line, in the same transaction. */
 export async function applyMovementToItem(req: PayloadRequest, doc: Doc) {
   const payload = req.payload
   const o = suppliesOf(payload)
   const internal = req.context?.[INTERNAL] as Internal | undefined
+  if (idOf(doc.lot) !== null) {
+    const lot = (await payload.findByID({ collection: o.lots as CollectionSlug, id: idOf(doc.lot)!, ...sys, joins: false, req })) as Doc
+    await asInternal(req, { ...internal }, () =>
+      payload.update({ collection: o.lots as CollectionSlug, id: lot.id, data: { onHand: round((num(lot.onHand) ?? 0) + doc.change) } as never, ...sys, req }),
+    )
+  }
   if (internal?.opening) return
   const item = (await payload.findByID({ collection: o.items as CollectionSlug, id: idOf(doc.item)!, ...sys, joins: false, req })) as Doc
   await asInternal(req, { ...internal }, () =>
@@ -235,6 +437,89 @@ export async function applyMovementToItem(req: PayloadRequest, doc: Doc) {
       req,
     }),
   )
+}
+
+/**
+ * Write off every lot past its use-by day that still has stock, as `wasted` (expired), one lot per
+ * transaction. Run it from a scheduled job; the overview also runs it when `lots.autoWriteOff` is on.
+ */
+export async function writeOffExpired(payload: Payload, options: { now?: Date } = {}): Promise<{ lots: number }> {
+  const o = suppliesOf(payload)
+  const now = options.now ?? new Date()
+  const candidates = (await payload.find({ collection: o.lots as CollectionSlug, where: { onHand: { greater_than: 0 } }, ...list })).docs as Doc[]
+  let written = 0
+  for (const lot of candidates.filter((l) => isExpired(l.expiresOn, now))) {
+    try {
+      await transaction(payload, undefined, async (req) => {
+        const fresh = (await payload.findByID({ collection: o.lots as CollectionSlug, id: lot.id, ...sys, joins: false, disableErrors: true, req })) as Doc | null
+        const left = num(fresh?.onHand) ?? 0
+        if (!fresh || left <= 0) return
+        await asInternal(req, { negativeStock: 'warn' }, () =>
+          payload.create({
+            collection: o.movements as CollectionSlug,
+            data: { item: idOf(fresh.item), kind: 'wasted', wasteReason: 'expired', quantity: left, lot: fresh.id, reason: `Expired (use by ${String(fresh.expiresOn).slice(0, 10)})` } as never,
+            ...sys,
+            req,
+          }),
+        )
+        written++
+      })
+    } catch (error) {
+      payload.logger.error({ err: error, msg: `kitting: couldn’t write off expired lot ${lot.id}` })
+    }
+  }
+  if (written) await sendPendingAlerts(payload).catch(() => undefined)
+  return { lots: written }
+}
+
+/**
+ * Suggest an item's waste allowance from what really happened over the last `days` (default 90):
+ * the allowance already taken, plus recorded waste, minus what recounts found extra, as a share of
+ * what recipes used. Needs at least `minUses` (default 10) recipe uses; otherwise says why not.
+ */
+export async function suggestWastePercent(
+  payload: Payload,
+  itemID: ID,
+  options: { days?: number; minUses?: number; now?: Date; req?: Req } = {},
+): Promise<{ percent: number | null; explanation: string; basis: { used: number; allowance: number; wasted: number; corrections: number; uses: number } }> {
+  const o = suppliesOf(payload)
+  const days = options.days ?? 90
+  const minUses = options.minUses ?? 10
+  const since = new Date((options.now ?? new Date()).getTime() - days * DAY).toISOString()
+  const item = await getItem(payload, o, options.req ?? {}, itemID)
+  if (!item) throw new KittingError('itemNotFound', 'That supply doesn’t exist.')
+  const ms = (await payload.find({ collection: o.movements as CollectionSlug, where: { and: [{ item: { equals: itemID } }, { createdAt: { greater_than_equal: since } }] }, ...list, req: options.req }))
+    .docs as Doc[]
+  let used = 0
+  let allowance = 0
+  let wasted = 0
+  let corrections = 0
+  let uses = 0
+  for (const m of ms) {
+    const change = num(m.change) ?? 0
+    if (m.kind === 'used' && idOf(m.recipe) !== null) {
+      const a = num(m.allowance) ?? 0
+      used += -change - a
+      allowance += a
+      uses++
+    } else if (m.kind === 'wasted') wasted += -change
+    else if (m.kind === 'adjusted' && m.reason !== 'Opening stock') corrections += change
+  }
+  const basis = { used: round(used), allowance: round(allowance), wasted: round(wasted), corrections: round(corrections), uses }
+  const unit = unitOf(item)
+  if (uses < minUses || used <= 0)
+    return { percent: null, basis, explanation: `Not enough history yet: ${uses} recipe use${uses === 1 ? '' : 's'} of ${nameOf(item)} in ${days} days (needs ${minUses}).` }
+  const loss = allowance + wasted - corrections
+  const percent = Math.max(Math.round((loss / used) * 1000) / 10, 0)
+  return {
+    percent,
+    basis,
+    explanation:
+      `Over ${days} days recipes used ${plural(basis.used, unit)} of ${nameOf(item)}. ` +
+      `The allowance took ${plural(basis.allowance, unit)}, ${plural(basis.wasted, unit)} was recorded as waste, ` +
+      `and counts found ${plural(Math.abs(basis.corrections), unit)} ${basis.corrections >= 0 ? 'more' : 'less'} than expected. ` +
+      `That’s about ${percent}% lost.`,
+  }
 }
 
 async function alertItemOf(payload: Payload, o: ResolvedSupplies, item: Doc, req?: Req): Promise<AlertItem> {
@@ -340,17 +625,47 @@ export type StockRow = {
   supplier: { id: ID; name: string; email?: string | null; phone?: string | null; website?: string | null } | null
   scope: ID | null
   scopeName: string | null
+  /** Lots with stock, first to expire first (supplies with lots tracked). */
+  lots: LotRow[]
+  /** On hand minus expired lots not yet written off. */
+  usable: number
+  /** The item's own waste allowance, or the default (null when allowances are off). */
+  wastePercent: number | null
 }
+
+export type LotRow = { id: ID; label: string; lotNumber: string | null; expiresOn: string | null; onHand: number; expired: boolean; expiringSoon: boolean }
 
 /**
  * Every item someone can see, with what's below level and how much to reorder. Pass the signed-in
  * user to apply their access (the admin overview does); without one it reads everything.
  */
-export async function stockReport(payload: Payload, options: { user?: Doc | null; req?: Req } = {}): Promise<{ rows: StockRow[]; below: StockRow[] }> {
+export async function stockReport(
+  payload: Payload,
+  options: { user?: Doc | null; req?: Req; now?: Date } = {},
+): Promise<{ rows: StockRow[]; below: StockRow[]; expiring: (LotRow & { item: StockRow })[] }> {
   const o = suppliesOf(payload)
+  const now = options.now ?? new Date()
   const access = options.user !== undefined ? { overrideAccess: false, user: options.user } : { overrideAccess: true }
   const docs = (await payload.find({ collection: o.items as CollectionSlug, ...access, depth: 1, pagination: false, sort: 'name', req: options.req })).docs as Doc[]
+  const lotDocs = docs.some((d) => d.trackLots)
+    ? ((await payload.find({ collection: o.lots as CollectionSlug, where: { onHand: { greater_than: 0 } }, ...access, depth: 0, pagination: false, req: options.req })).docs as Doc[])
+    : []
   const rows = docs.map((d): StockRow => {
+    const warn = num(d.expiryWarningDays) ?? o.lotWarningDays
+    const lots: LotRow[] = d.trackLots
+      ? lotDocs
+          .filter((l) => sameID(l.item, d.id))
+          .sort(byExpiry)
+          .map((l) => ({
+            id: l.id,
+            label: String(l.label ?? l.lotNumber ?? ''),
+            lotNumber: l.lotNumber ?? null,
+            expiresOn: l.expiresOn ?? null,
+            onHand: num(l.onHand) ?? 0,
+            expired: isExpired(l.expiresOn, now),
+            expiringSoon: expiresWithin(l.expiresOn, warn, now),
+          }))
+      : []
     const supplier = d.supplier && typeof d.supplier === 'object' ? d.supplier : null
     const scope = o.scopeField ? d[o.scopeField] : null
     const onHand = num(d.onHand) ?? 0
@@ -372,7 +687,12 @@ export async function stockReport(payload: Payload, options: { user?: Doc | null
       supplier: supplier ? { id: supplier.id, name: String(supplier.name ?? ''), email: supplier.email ?? null, phone: supplier.phone ?? null, website: supplier.website ?? null } : null,
       scope: idOf(scope),
       scopeName: scope && typeof scope === 'object' ? String(scope.name ?? scope.title ?? scope.slug ?? scope.id) : null,
+      lots,
+      usable: round(onHand - lots.filter((l) => l.expired).reduce((t, l) => t + l.onHand, 0)),
+      wastePercent: o.waste.enabled ? (percentOf(d.wastePercent) ?? o.waste.defaultPercent) : null,
     }
   })
-  return { rows, below: rows.filter((r) => r.below) }
+  const expiring = rows.flatMap((r) => (r.retired ? [] : r.lots.filter((l) => l.expired || l.expiringSoon).map((l) => ({ ...l, item: r }))))
+  expiring.sort(byExpiry)
+  return { rows, below: rows.filter((r) => r.below), expiring }
 }

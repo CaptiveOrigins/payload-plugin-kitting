@@ -3,7 +3,7 @@ import { MongoMemoryReplSet } from 'mongodb-memory-server'
 import { buildConfig, getPayload, type Access, type CollectionConfig, type Field, type Payload } from 'payload'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
-import { applyRecipe, sendPendingAlerts, stockReport, kittingPlugin, KittingError } from '../src/index.js'
+import { applyRecipe, kittingPlugin, KittingError, sendPendingAlerts, stockReport, suggestWastePercent, writeOffExpired } from '../src/index.js'
 
 // Made-up data throughout: example.com addresses, invented supplies and sites.
 type Doc = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -60,7 +60,7 @@ beforeAll(async () => {
             canSend: () => emailOn,
             sendEmail: async ({ to, subject, text }) => void mail.push({ to, subject, text }),
           },
-          overrides: { items: withTenant, suppliers: withTenant, movements: withTenant, recipes: withTenant },
+          overrides: { items: withTenant, suppliers: withTenant, movements: withTenant, recipes: withTenant, lots: withTenant },
         }),
       ],
     }),
@@ -302,5 +302,116 @@ describe('sites and access', () => {
     await expect(payload.update({ collection: 'supply-items' as never, id: swab.id, data: { name: 'x' } as never, ...as(viewerA) })).rejects.toThrow()
     await create('supply-movements', { item: swab.id, kind: 'used', quantity: 1 }, as(staffA))
     expect((await get('supply-items', swab.id)).onHand).toBe(9)
+  })
+})
+
+describe('units and the waste allowance', () => {
+  const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10) + 'T00:00:00.000Z'
+
+  it('takes stock in packs and other units of the same kind, and refuses the wrong kind', async () => {
+    const beans = await create('supply-items', { tenant: siteA.id, name: 'Beans', unit: 'grams', packs: [{ name: '1 kg bag', size: 1000 }], openingStock: 500 })
+    expect(beans.unit).toBe('g')
+    await create('supply-movements', { item: beans.id, kind: 'received', quantity: 2, unit: '1 kg bag' }, as(staffA))
+    const m = await create('supply-movements', { item: beans.id, kind: 'received', quantity: 0.5, unit: 'kg' }, as(staffA))
+    expect(m).toMatchObject({ change: 500, unit: 'kg', quantity: 0.5 })
+    expect((await get('supply-items', beans.id)).onHand).toBe(3000)
+    await expect(create('supply-movements', { item: beans.id, kind: 'used', quantity: 1, unit: 'ml' }, as(staffA))).rejects.toThrow(/counted in g/)
+  })
+
+  it('adds the allowance to what a recipe uses, most specific first, and records it', async () => {
+    const beans = await create('supply-items', { tenant: siteA.id, name: 'Beans', unit: 'g', openingStock: 5000, wastePercent: 5 })
+    const milk = await create('supply-items', { tenant: siteA.id, name: 'Milk', unit: 'ml', openingStock: 10000 })
+    const latte = await create('supply-recipes', {
+      tenant: siteA.id,
+      name: 'Latte',
+      key: `latte-${Math.random().toString(36).slice(2, 8)}`,
+      lines: [
+        { item: beans.id, quantity: 0.018, unit: 'kg' },
+        { item: milk.id, quantity: 0.2, unit: 'l', wastePercent: 10 },
+      ],
+    })
+    const result = await applyRecipe(payload, { id: latte.id }, 10, { scope: siteA.id })
+    expect(result.movements.map((m) => [m.change, m.allowance])).toEqual([
+      [-189, 9],
+      [-2200, 200],
+    ])
+    expect((await get('supply-items', beans.id)).onHand).toBe(4811)
+    await payload.update({ collection: 'supply-recipes' as never, id: latte.id, data: { wastePercent: 0 } as never })
+    const none = await applyRecipe(payload, { id: latte.id }, 1, { scope: siteA.id })
+    expect(none.movements.map((m) => m.change)).toEqual([-18, -220]) // the line's own 10% still wins
+  })
+
+  it('suggests an allowance from what really happened, once there is enough history', async () => {
+    const swab = await create('supply-items', { tenant: siteA.id, name: 'Swab', unit: 'each', openingStock: 1000, wastePercent: 5 })
+    const kit = await create('supply-recipes', { tenant: siteA.id, name: 'Kit', key: `kit-${Math.random().toString(36).slice(2, 8)}`, lines: [{ item: swab.id, quantity: 10 }] })
+    for (let i = 0; i < 9; i++) await applyRecipe(payload, { id: kit.id }, 1, { scope: siteA.id })
+    expect((await suggestWastePercent(payload, swab.id)).percent).toBeNull()
+    await applyRecipe(payload, { id: kit.id }, 1, { scope: siteA.id })
+    await create('supply-movements', { item: swab.id, kind: 'wasted', wasteReason: 'dud', quantity: 2 }, as(staffA))
+    await create('supply-movements', { item: swab.id, kind: 'adjusted', quantity: 3, reason: 'count' }, as(staffA))
+    // used 100, allowance 5, wasted 2, a count found 3 more: (5 + 2 − 3) / 100 = 4%.
+    const s = await suggestWastePercent(payload, swab.id)
+    expect(s.percent).toBe(4)
+    expect(s.basis).toEqual({ used: 100, allowance: 5, wasted: 2, corrections: 3, uses: 10 })
+    expect(s.explanation).toMatch(/about 4% lost/)
+  })
+
+  it('lots: first to expire first, expired stock unusable and written off, every use on a lot', async () => {
+    const swab = await create('supply-items', {
+      tenant: siteA.id,
+      name: 'Lot swab',
+      unit: 'each',
+      trackLots: true,
+      openingStock: 10,
+      openingLotNumber: 'A1',
+      openingExpiresOn: day(30),
+    })
+    await create('supply-movements', { item: swab.id, kind: 'received', quantity: 20, lotNumber: 'B2', expiresOn: day(90) }, as(staffA))
+    await create('supply-movements', { item: swab.id, kind: 'received', quantity: 5, lotNumber: 'OLD', expiresOn: day(-3) }, as(staffA))
+    const lots = async (): Promise<Doc> =>
+      Object.fromEntries(
+        ((await payload.find({ collection: 'supply-lots' as never, where: { item: { equals: swab.id } }, pagination: false, depth: 0 })).docs as Doc[]).map((l) => [l.lotNumber, l]),
+      )
+    expect(Object.values(await lots()).map((l) => [l.lotNumber, l.onHand, String(l.tenant)])).toEqual(
+      expect.arrayContaining([
+        ['A1', 10, String(siteA.id)],
+        ['B2', 20, String(siteA.id)],
+        ['OLD', 5, String(siteA.id)],
+      ]),
+    )
+    const kit = await create('supply-recipes', { tenant: siteA.id, name: 'Lot kit', key: `lk-${Math.random().toString(36).slice(2, 8)}`, lines: [{ item: swab.id, quantity: 3 }] })
+    const r = await applyRecipe(payload, { id: kit.id }, 5, { scope: siteA.id })
+    let l = await lots()
+    expect(r.movements.map((m) => [String(m.lot), -m.change])).toEqual([
+      [String(l.A1.id), 10],
+      [String(l.B2.id), 5],
+    ])
+    expect([l.A1.onHand, l.B2.onHand, l.OLD.onHand]).toEqual([0, 15, 5])
+    // 20 on hand, but 5 of it is expired: only 15 usable.
+    const short = await applyRecipe(payload, { id: kit.id }, 6, { scope: siteA.id }).catch((e) => e)
+    expect(short).toBeInstanceOf(KittingError)
+    expect(short.shortages).toEqual([expect.objectContaining({ onHand: 15, needed: 18, short: 3 })])
+    // By hand: the first-to-expire lot that covers it; the same lot number adds to that lot.
+    const used = await create('supply-movements', { item: swab.id, kind: 'used', quantity: 2 }, as(staffA))
+    expect(ids([used.lot])[0]).toBe(String(l.B2.id))
+    await create('supply-movements', { item: swab.id, kind: 'received', quantity: 4, lotNumber: 'B2' }, as(staffA))
+    expect((await lots()).B2.onHand).toBe(17)
+    // Lots can't be set by hand or duplicated.
+    await payload.update({ collection: 'supply-lots' as never, id: l.B2.id, data: { onHand: 999 } as never, ...as(staffA) })
+    expect((await lots()).B2.onHand).toBe(17)
+    await expect(create('supply-lots', { tenant: siteA.id, item: swab.id, lotNumber: 'B2' }, as(staffA))).rejects.toThrow(/already has a lot B2/)
+    // The overview lists the expired lot and counts it out of what's usable.
+    const report = await stockReport(payload, { user: { ...staffA, collection: 'users' } })
+    const row = report.rows.find((r) => String(r.id) === String(swab.id))!
+    expect([row.onHand, row.usable]).toEqual([22, 17])
+    expect(report.expiring.filter((e) => String(e.item.id) === String(swab.id)).map((e) => [e.lotNumber, e.expired])).toEqual([['OLD', true]])
+    // Expired stock is written off as waste.
+    expect((await writeOffExpired(payload)).lots).toBeGreaterThanOrEqual(1)
+    l = await lots()
+    expect(l.OLD.onHand).toBe(0)
+    const wasted = (await movementsOf(swab)).filter((m) => m.kind === 'wasted')
+    expect(wasted).toEqual([expect.objectContaining({ wasteReason: 'expired', change: -5 })])
+    expect((await get('supply-items', swab.id)).onHand).toBe(17)
+    expect(sum(await movementsOf(swab))).toBe(17)
   })
 })

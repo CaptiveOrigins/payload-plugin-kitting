@@ -2,8 +2,14 @@ import type { Access, CollectionConfig, Payload, PayloadRequest } from 'payload'
 
 export type ID = string | number
 
-/** What a movement does to stock. `adjusted` takes a signed change (a recount, breakage, a correction). */
-export type MovementKind = 'received' | 'used' | 'adjusted'
+/**
+ * What a movement does to stock. `adjusted` takes a signed change (a recount, a correction).
+ * `wasted` takes stock out and counts towards the waste figures (spilled, spoiled, expired, a dud).
+ */
+export type MovementKind = 'received' | 'used' | 'adjusted' | 'wasted'
+
+/** Why stock was wasted. */
+export type WasteReason = 'spilled' | 'spoiled' | 'expired' | 'defective' | 'dud' | 'other'
 
 /** Where a low-stock alert stands. Empty while the item is at or above its level. */
 export type AlertStatus = 'pending' | 'sending' | 'sent' | 'not-sent' | 'failed'
@@ -29,8 +35,8 @@ export type AlertItem = {
 }
 
 export type KittingPluginOptions = {
-  /** Collection slugs. Defaults: `supply-items`, `suppliers`, `supply-movements`, `supply-recipes`. */
-  slugs?: { items?: string; suppliers?: string; movements?: string; recipes?: string }
+  /** Collection slugs. Defaults: `supply-items`, `suppliers`, `supply-movements`, `supply-recipes`, `supply-lots`. */
+  slugs?: { items?: string; suppliers?: string; movements?: string; recipes?: string; lots?: string }
   /**
    * Who may do what. Plain Payload access functions, so they can return a query (for example
    * "only my sites"). `manage` adds and edits items, suppliers and recipes and records movements;
@@ -46,6 +52,20 @@ export type KittingPluginOptions = {
   scopeField?: string
   /** Using stock below zero: `refuse` (default) writes nothing and says what's short; `warn` goes ahead and reports it. */
   negativeStock?: NegativeStock
+  /**
+   * The waste allowance: a % added to what a recipe uses, for spills, spoilage, defects and duds, so
+   * stock stays close to real without counting every day. `enabled: false` turns every allowance off.
+   * `defaultPercent` applies to items without their own. An item, a recipe and a recipe line can each
+   * set their own; the most specific wins (line, then recipe, then item, then this default).
+   */
+  waste?: { enabled?: boolean; defaultPercent?: number }
+  /**
+   * Lots and use-by dates, for items with "Track lots" ticked. `warningDays` is the default for how
+   * soon before a lot's use-by date it shows as expiring. With `autoWriteOff` (default true), expired
+   * lots are written off as waste when the overview is opened, and `writeOffExpired` does the same
+   * from a scheduled job.
+   */
+  lots?: { warningDays?: number; autoWriteOff?: boolean }
   alerts?: {
     /** Who gets low-stock emails. A list, or a function per item (for example per site). Empty: alerts are recorded, not sent. */
     recipients?: string[] | ((args: { payload: Payload; item: AlertItem }) => string[] | Promise<string[]>)
@@ -62,6 +82,7 @@ export type KittingPluginOptions = {
     suppliers?: (c: CollectionConfig) => CollectionConfig
     movements?: (c: CollectionConfig) => CollectionConfig
     recipes?: (c: CollectionConfig) => CollectionConfig
+    lots?: (c: CollectionConfig) => CollectionConfig
   }
   /** Add the Supplies overview at /admin/supplies (below level, reorder list, all stock). Default true. */
   adminView?: boolean
@@ -74,6 +95,7 @@ export type ResolvedSupplies = {
   suppliers: string
   movements: string
   recipes: string
+  lots: string
   userSlug: string
   read: Access
   manage: Access
@@ -85,6 +107,9 @@ export type ResolvedSupplies = {
   render?: NonNullable<KittingPluginOptions['alerts']>['render']
   adminView: boolean
   adminGroup: string
+  waste: { enabled: boolean; defaultPercent: number }
+  lotWarningDays: number
+  autoWriteOff: boolean
 }
 
 /** How a host refers to a recipe: by id, or by its key (within a scope when there is one). */
@@ -114,7 +139,8 @@ export type Shortage = { item: ID; name: string; unit: string; onHand: number; n
 export type ApplyRecipeResult = {
   recipe: { id: ID; name: string }
   count: number
-  movements: { id: ID; item: ID; change: number; onHandAfter: number }[]
+  /** One per item and lot used. `allowance` is the part of `change` that is the waste allowance. */
+  movements: { id: ID; item: ID; lot: ID | null; change: number; allowance: number; onHandAfter: number }[]
   /** Items that went below zero (only with `negativeStock: 'warn'`). */
   shortages: Shortage[]
 }

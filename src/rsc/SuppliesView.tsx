@@ -2,7 +2,7 @@ import { DefaultTemplate } from '@payloadcms/next/templates'
 import type { AdminViewServerProps, Payload, PayloadRequest } from 'payload'
 import React from 'react'
 
-import { sendPendingAlerts, stockReport, suppliesOf, type StockRow } from '../stock.js'
+import { sendPendingAlerts, stockReport, suppliesOf, writeOffExpired, type StockRow } from '../stock.js'
 
 const fmt = new Intl.NumberFormat('en', { maximumFractionDigits: 3 })
 const qty = (n: number | null, unit: string) => (n === null ? '—' : `${fmt.format(n)} ${unit}`)
@@ -42,8 +42,9 @@ export async function SuppliesView({ initPageResult, params, searchParams }: Adm
   const admin = req.payload.config.routes.admin
   const ok = await allowed(req)
   // A safety net: alerts left pending (for example by a caller's transaction) go out now.
-  if (ok) await sendPendingAlerts(req.payload).catch((error) => req.payload.logger.error({ err: error, msg: 'supplies: pending alerts not sent' }))
-  const { rows, below } = ok ? await stockReport(req.payload, { user: req.user }) : { rows: [], below: [] }
+  if (ok && o.autoWriteOff) await writeOffExpired(req.payload).catch((error) => req.payload.logger.error({ err: error, msg: 'kitting: expired lots not written off' }))
+  if (ok) await sendPendingAlerts(req.payload).catch((error) => req.payload.logger.error({ err: error, msg: 'kitting: pending alerts not sent' }))
+  const { rows, below, expiring } = ok ? await stockReport(req.payload, { user: req.user }) : { rows: [], below: [], expiring: [] }
   const current = rows.filter((r) => !r.retired)
   const retired = rows.filter((r) => r.retired)
   const showScope = Boolean(o.scopeField) && new Set(rows.map((r) => String(r.scope))).size > 1
@@ -101,6 +102,7 @@ export async function SuppliesView({ initPageResult, params, searchParams }: Adm
                 <li><a className="btn btn--style-secondary btn--size-small" style={{ margin: 0 }} href={`${admin}/collections/${o.items}/create`}>Add a supply</a></li>
                 <li><a className="btn btn--style-secondary btn--size-small" style={{ margin: 0 }} href={`${admin}/collections/${o.recipes}`}>Recipes</a></li>
                 <li><a className="btn btn--style-secondary btn--size-small" style={{ margin: 0 }} href={`${admin}/collections/${o.suppliers}`}>Suppliers</a></li>
+                <li><a className="btn btn--style-secondary btn--size-small" style={{ margin: 0 }} href={`${admin}/collections/${o.lots}`}>Lots</a></li>
                 <li><a className="btn btn--style-secondary btn--size-small" style={{ margin: 0 }} href={`${admin}/collections/${o.movements}`}>Stock log</a></li>
               </ul>
             </nav>
@@ -162,6 +164,33 @@ export async function SuppliesView({ initPageResult, params, searchParams }: Adm
                 </>
               )}
             </section>
+
+            {expiring.length > 0 && (
+              <section aria-labelledby="supplies-expiring">
+                <h2 id="supplies-expiring" style={{ marginTop: 0 }}>Use soon ({expiring.length})</h2>
+                <table style={table}>
+                  <caption style={caption}>Lots past or near their use-by date, first to expire first. They’re used first; expired ones are written off as waste.</caption>
+                  <thead>
+                    <tr>
+                      <th scope="col" style={cell}>Supply</th>
+                      <th scope="col" style={cell}>Lot</th>
+                      <th scope="col" style={num}>On hand</th>
+                      <th scope="col" style={cell}>Use by</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {expiring.map((l) => (
+                      <tr key={String(l.id)}>
+                        <th scope="row" style={{ ...cell, fontWeight: 400 }}>{link(l.item)}</th>
+                        <td style={cell}><a href={`${admin}/collections/${o.lots}/${l.id}`}>{l.lotNumber ?? 'No number'}</a></td>
+                        <td style={num}>{qty(l.onHand, l.item.unit)}</td>
+                        <td style={cell}>{l.expired ? <strong>Expired {day(l.expiresOn)}</strong> : day(l.expiresOn)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </section>
+            )}
 
             <section aria-labelledby="supplies-all">
               <h2 id="supplies-all" style={{ marginTop: 0 }}>All supplies</h2>
