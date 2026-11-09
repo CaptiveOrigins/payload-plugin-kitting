@@ -92,6 +92,6 @@ The setup page, the count page (keyboard only, with an invalid box blocking Save
 
 66 tests. Added: shrinkage settings per site. A site switches it off or changes its default, and other sites are unaffected. There's one set of settings per site. A viewer can't create them and another site's staff can't change them. Nobody reads them without signing in.
 
-Checked in a browser, with made-up data: the settings page, and the learned suggestion on a supply's page with its reasoning. "Use 10.3%" saved when pressed with the keyboard and when clicked by a script. Twice, a mouse click from the automated browser didn't reach the button. React's click handler is attached and the button is on top, so this looks like the automated browser, but a person should try it with a mouse: it goes on the owner's hands-on list with 0.2.0.
+Checked in a browser, with made-up data: the settings page, and the learned suggestion on a supply's page with its reasoning. "Use 10.3%" saved when pressed with the keyboard and when clicked by a script. Twice, a mouse click from the in-app browser pane didn't reach the button. A real mouse click from Playwright (`page.click()` with `trial: false`) did save it, 2% to 10.3%. At the button's centre, `elementFromPoint` returns the button itself, and its `pointer-events` is `auto`. So the in-app browser pane was at fault, not the page. The owner's hands-on test T14 still includes a mouse click.
 
 Skipped: rendering the supply page's suggestion in tests, which needs the full admin, as before.
