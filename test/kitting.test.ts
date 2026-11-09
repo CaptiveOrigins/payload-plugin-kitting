@@ -4,7 +4,7 @@ import { MongoMemoryReplSet } from 'mongodb-memory-server'
 import { buildConfig, getPayload, type Access, type CollectionConfig, type Field, type Payload } from 'payload'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
-import { applyRecipe, assignUnits, recommendBoxes, setupProgress, siteShrinkage, stockCount, buildUnits, recommendReadyStock, release, shipUnits, swapUnit, kittingPlugin, KittingError, voidUnit, sendPendingAlerts, stockReport, suggestShrinkagePercent, writeOffExpired } from '../src/index.js'
+import { applyRecipe, assignUnits, recommendBoxes, restockNeeds, setupProgress, siteShrinkage, stockCount, buildUnits, recommendReadyStock, release, shipUnits, swapUnit, kittingPlugin, KittingError, voidUnit, sendPendingAlerts, stockReport, suggestShrinkagePercent, writeOffExpired } from '../src/index.js'
 
 // Made-up data throughout: example.com addresses, invented supplies and sites.
 type Doc = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -919,5 +919,27 @@ describe('shrinkage settings per site', () => {
     await expect(payload.update({ collection: 'kitting-settings' as never, id: settings.id, data: { shrinkage: 'on' } as never, ...as(staffB) })).rejects.toThrow()
     await expect(payload.find({ collection: 'kitting-settings' as never, overrideAccess: false })).rejects.toThrow()
     expect((await payload.find({ collection: 'kitting-settings' as never, ...as(staffB) })).docs).toHaveLength(0)
+  })
+})
+
+describe('what to buy, for Restock', () => {
+  it('suggests the larger of the reorder and what ready stock needs, per site, with the reason', async () => {
+    const tag = Math.random().toString(36).slice(2, 7)
+    // Below level: 5 of 10, reorder 30.
+    const cups = await create('supply-items', { tenant: siteA.id, name: `Need cups ${tag}`, unit: 'each', openingStock: 5, lowStockLevel: 10, reorderQuantity: 30 })
+    // Above level, but 20 kits to keep × 3 swabs = 60 needed, 25 usable: 35 short.
+    const swabs = await create('supply-items', { tenant: siteA.id, name: `Need swabs ${tag}`, unit: 'each', openingStock: 25, lowStockLevel: 5 })
+    await create('supply-recipes', { tenant: siteA.id, name: `Need kit ${tag}`, key: `nk-${tag}`, lines: [{ item: swabs.id, quantity: 3 }], readyStock: { baseline: 20 } })
+    // Plenty: nothing to buy. Another site's shortage never shows.
+    await create('supply-items', { tenant: siteA.id, name: `Need plenty ${tag}`, unit: 'each', openingStock: 500, lowStockLevel: 10 })
+    await create('supply-items', { tenant: siteB.id, name: `Need other ${tag}`, unit: 'each', openingStock: 0, lowStockLevel: 10 })
+    const needs = (await restockNeeds(payload, { scope: siteA.id })).filter((n) => n.name.endsWith(tag))
+    expect(needs.map((n) => [n.name, n.suggested])).toEqual([
+      [`Need cups ${tag}`, 30],
+      [`Need swabs ${tag}`, 35],
+    ])
+    expect(needs[1]!.why).toBe(`20 Need kit ${tag} to build need 60 each, 25 usable`)
+    expect(needs[0]!.why).toBe('below its level (5 of 10 each)')
+    await expect(restockNeeds(payload, {})).rejects.toThrow(/say which tenant/)
   })
 })
