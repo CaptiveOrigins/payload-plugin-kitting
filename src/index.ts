@@ -1,4 +1,5 @@
 export { kittingPlugin } from './plugin.js'
+export { restockNeeds, type RestockNeed } from './restock.js'
 export { ecommerceSource, syncAvailability } from './ecommerce.js'
 export { byCost, packings, postageFor, recommendBoxes, type BoxOption, type Packing } from './boxes.js'
 export { readyStatus, refreshStockStates, sendStockAlerts, stateFor, type ReadyStatus, type StockState } from './readystock.js'

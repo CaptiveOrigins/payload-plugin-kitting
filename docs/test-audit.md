@@ -95,3 +95,7 @@ The setup page, the count page (keyboard only, with an invalid box blocking Save
 Checked in a browser, with made-up data: the settings page, and the learned suggestion on a supply's page with its reasoning. "Use 10.3%" saved when pressed with the keyboard and when clicked by a script. Twice, a mouse click from the in-app browser pane didn't reach the button. A real mouse click from Playwright (`page.click()` with `trial: false`) did save it, 2% to 10.3%. At the button's centre, `elementFromPoint` returns the button itself, and its `pointer-events` is `auto`. So the in-app browser pane was at fault, not the page. The owner's hands-on test T14 still includes a mouse click.
 
 Skipped: rendering the supply page's suggestion in tests, which needs the full admin, as before.
+
+## 2026-11-09, `restockNeeds` (crossing `kitting-restock`)
+
+67 tests. Added "what to buy, for Restock": it covers below-level and ready-stock needs, the larger of the two, the reason given, site isolation (another site's shortage never shows) and a site required. It's read-only, so there are no access paths to test: callers pass their own `req` and run with their own checks.
