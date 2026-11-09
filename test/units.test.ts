@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { allocate, describeUse, isExpired, wastePercent } from '../src/stock.js'
+import { allocate, describeUse, isExpired, shrinkagePercent } from '../src/stock.js'
 import { conversionFactor, normalizeUnit, unitsFor } from '../src/units.js'
 
 describe('units', () => {
@@ -24,17 +24,17 @@ describe('units', () => {
   })
 })
 
-describe('waste allowance', () => {
-  const o = { waste: { enabled: true, defaultPercent: 2 } }
+describe('shrinkage allowance', () => {
+  const o = { shrinkage: { enabled: true, defaultPercent: 2 } }
   it('takes the most specific: line, recipe, item, then the default', () => {
-    expect(wastePercent(o, {})).toBe(2)
-    expect(wastePercent(o, { wastePercent: 5 })).toBe(5)
-    expect(wastePercent(o, { wastePercent: 5 }, { wastePercent: 8 })).toBe(8)
-    expect(wastePercent(o, { wastePercent: 5 }, { wastePercent: 8 }, { wastePercent: 0 })).toBe(0)
-    expect(wastePercent({ waste: { enabled: false, defaultPercent: 2 } }, { wastePercent: 5 })).toBe(0)
+    expect(shrinkagePercent(o, {})).toBe(2)
+    expect(shrinkagePercent(o, { shrinkagePercent: 5 })).toBe(5)
+    expect(shrinkagePercent(o, { shrinkagePercent: 5 }, { shrinkagePercent: 8 })).toBe(8)
+    expect(shrinkagePercent(o, { shrinkagePercent: 5 }, { shrinkagePercent: 8 }, { shrinkagePercent: 0 })).toBe(0)
+    expect(shrinkagePercent({ shrinkage: { enabled: false, defaultPercent: 2 } }, { shrinkagePercent: 5 })).toBe(0)
   })
   it('reads plainly', () => {
-    expect(describeUse({ quantity: 18, unit: 'g', name: 'beans', percent: 5, per: 'drink' })).toBe('18 g of beans per drink + 5% waste allowance')
+    expect(describeUse({ quantity: 18, unit: 'g', name: 'beans', percent: 5, per: 'drink' })).toBe('18 g of beans per drink + 5% shrinkage allowance')
     expect(describeUse({ quantity: 2, unit: 'each', name: 'swabs', percent: 0 })).toBe('2 each of swabs')
   })
 })

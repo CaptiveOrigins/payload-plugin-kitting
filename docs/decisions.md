@@ -115,3 +115,11 @@ The owner: "Our point should be that anyone could use it from a cafe to a genomi
 - **Built units.** External IDs are unique per site. Units are made only by the builder and can't be deleted. Only their notes can be edited by hand.
 - **Voiding a unit.** A dud keeps stock as it is: its supplies were used. "Built by mistake" with return-to-stock puts the supplies back into the same lots.
 - **Ready stock** is capped at the recipe's "most to build at once", as the owner asked. Demand counts from the first sale, weighted with a 30-day half-life, and needs 28 days of history before a method is trusted.
+
+## 2026-11-08 (owner): "shrinkage"
+
+The waste and dud buffer is called **shrinkage**, the standard business term for stock lost to damage, spoilage, defects or errors. It's "shrinkage allowance" (for example "Shrinkage allowance: 5%") in config, the admin, the docs and the code. This replaces "waste allowance" in the earlier entries above.
+
+- Config: `shrinkage: { enabled, defaultPercent }`. Fields: `shrinkagePercent` on items, recipes and recipe lines. Each movement records its `shrinkageAllowance`. The suggestion function is `suggestShrinkagePercent`.
+- Recorded losses are the movement kind `written-off`, replacing `wasted`. Each carries a `writeOffReason`: spoiled, damaged, defective, expired, lost or other. Write-offs feed the learned suggestion.
+- Voided built units keep their own reasons (dud, damaged, built by mistake, other). These are about a unit, not about stock.

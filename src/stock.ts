@@ -114,23 +114,23 @@ export const getItem = async (payload: Payload, o: ResolvedSupplies, req: Req, i
   idOf(id) === null ? null : ((await payload.findByID({ collection: o.items as CollectionSlug, id: idOf(id)!, ...sys, joins: false, disableErrors: true, req })) as Doc | null)
 
 // ---------------------------------------------------------------------------------------------
-// Waste allowance
+// Shrinkage allowance
 
 const percentOf = (v: unknown) => (num(v) === null ? null : Math.min(Math.max(v as number, 0), 100))
 
 /**
- * The waste allowance % that applies: the recipe line's own, else the recipe's, else the item's,
+ * The shrinkage allowance % that applies: the recipe line's own, else the recipe's, else the item's,
  * else the plugin's default. Zero when allowances are switched off.
  */
-export function wastePercent(o: Pick<ResolvedSupplies, 'waste'>, item: Doc, recipe?: Doc | null, line?: Doc | null): number {
-  if (!o.waste.enabled) return 0
-  return percentOf(line?.wastePercent) ?? percentOf(recipe?.wastePercent) ?? percentOf(item.wastePercent) ?? o.waste.defaultPercent
+export function shrinkagePercent(o: Pick<ResolvedSupplies, 'shrinkage'>, item: Doc, recipe?: Doc | null, line?: Doc | null): number {
+  if (!o.shrinkage.enabled) return 0
+  return percentOf(line?.shrinkagePercent) ?? percentOf(recipe?.shrinkagePercent) ?? percentOf(item.shrinkagePercent) ?? o.shrinkage.defaultPercent
 }
 
-/** "18 g of Beans + 5% waste allowance": a recipe line in plain words. */
+/** "18 g of Beans + 5% shrinkage allowance": a recipe line in plain words. */
 export function describeUse(args: { quantity: number; unit: string; name: string; percent: number; per?: string }) {
   const base = `${fmt(args.quantity)} ${args.unit} of ${args.name}${args.per ? ` per ${args.per}` : ''}`
-  return args.percent > 0 ? `${base} + ${fmt(args.percent)}% waste allowance` : base
+  return args.percent > 0 ? `${base} + ${fmt(args.percent)}% shrinkage allowance` : base
 }
 
 const fmt = (n: number) => String(round(n))
@@ -227,7 +227,7 @@ export function allocate(item: Doc, lots: Doc[], quantity: number, now = new Dat
 export type Need = { item: Doc; base: number; allowance: number; percent: number }
 
 /**
- * What `count` of a recipe takes from each item, in the item's unit, with the waste allowance.
+ * What `count` of a recipe takes from each item, in the item's unit, with the shrinkage allowance.
  * Lines that use another recipe are expanded into that recipe's supplies (scaled by what it makes),
  * however deep, and refused if a recipe would use itself.
  */
@@ -257,7 +257,7 @@ export async function planRecipe(payload: Payload, o: ResolvedSupplies, req: Req
       const factor = conversionFactor(line.unit || item.unit, item.unit, item.packs ?? [])
       if (factor === null) throw new KittingError('unit', `"${r.name}" uses ${nameOf(item)} in ${line.unit}, which can’t be converted to ${unitOf(item)}.`)
       const base = round(quantity * factor * times)
-      const percent = wastePercent(o, item, r, line)
+      const percent = shrinkagePercent(o, item, r, line)
       const allowance = round((base * percent) / 100)
       const prev = needs.get(String(item.id))
       needs.set(String(item.id), { item: prev?.item ?? item, base: round((prev?.base ?? 0) + base), allowance: round((prev?.allowance ?? 0) + allowance), percent })
@@ -269,7 +269,7 @@ export async function planRecipe(payload: Payload, o: ResolvedSupplies, req: Req
 
 /**
  * Use a recipe's supplies to make `count` of something, in one transaction: one `used` movement per
- * item and lot (first to expire first), or nothing at all. Each item's waste allowance is added and
+ * item and lot (first to expire first), or nothing at all. Each item's shrinkage allowance is added and
  * recorded on the movement. Refuses when any item hasn't enough usable stock (unless `negativeStock`
  * is `warn`), naming every item that's short.
  */
@@ -338,7 +338,7 @@ export async function useNeeds(
           req,
         }),
       )) as Doc
-      movements.push({ id: doc.id, item: need.item.id, lot: part.lot, change: doc.change, allowance, onHandAfter: doc.onHandAfter })
+      movements.push({ id: doc.id, item: need.item.id, lot: part.lot, change: doc.change, shrinkageAllowance: allowance, onHandAfter: doc.onHandAfter })
     }
   }
   return { movements, shortages, lots: lotsUsed }
@@ -353,7 +353,7 @@ export async function mayManage(req: PayloadRequest, o: ResolvedSupplies, itemID
   return found.totalDocs > 0
 }
 
-const KINDS = ['received', 'used', 'adjusted', 'wasted']
+const KINDS = ['received', 'used', 'adjusted', 'written-off']
 
 /**
  * The movement hook: converts the entered unit to the item's, works out the change, picks or makes
@@ -377,7 +377,7 @@ export async function prepareMovement(req: PayloadRequest, data: Doc): Promise<D
   if (internal?.opening) {
     change = onHand
   } else if (!KINDS.includes(data.kind)) {
-    throw new KittingError('kind', 'Choose received, used, wasted or adjusted.')
+    throw new KittingError('kind', 'Choose received, used, written off or adjusted.')
   } else if (data.kind === 'adjusted') {
     if (quantity === null || quantity === 0) throw new KittingError('quantity', 'An adjustment adds (+) or takes away (−) something: it can’t be zero.')
     change = quantity * factor
@@ -426,11 +426,11 @@ export async function prepareMovement(req: PayloadRequest, data: Doc): Promise<D
   const out: Doc = { ...data, unit, change, onHandAfter: after, lot: lot?.id ?? null, by: internal ? (internal.by ?? null) : req.user && req.user.collection === o.userSlug ? req.user.id : null }
   delete out.lotNumber
   delete out.expiresOn
-  out.wasteReason = data.kind === 'wasted' ? data.wasteReason || 'other' : null
-  // Only the plugin links a movement to a recipe or records a waste allowance.
+  out.writeOffReason = data.kind === 'written-off' ? data.writeOffReason || 'other' : null
+  // Only the plugin links a movement to a recipe or records a shrinkage allowance.
   out.recipe = internal?.recipe ?? null
   out.count = internal?.count ?? null
-  out.allowance = internal?.allowance ?? 0
+  out.shrinkageAllowance = internal?.allowance ?? 0
   if (internal?.opening) out.kind = 'adjusted'
   if (o.scopeField) out[o.scopeField] = idOf(item[o.scopeField])
   return out
@@ -461,7 +461,7 @@ export async function applyMovementToItem(req: PayloadRequest, doc: Doc) {
 }
 
 /**
- * Write off every lot past its use-by day that still has stock, as `wasted` (expired), one lot per
+ * Write off every lot past its use-by day that still has stock, as `written-off` (expired), one lot per
  * transaction. Run it from a scheduled job; the overview also runs it when `lots.autoWriteOff` is on.
  */
 export async function writeOffExpired(payload: Payload, options: { now?: Date } = {}): Promise<{ lots: number }> {
@@ -478,7 +478,7 @@ export async function writeOffExpired(payload: Payload, options: { now?: Date } 
         await asInternal(req, { negativeStock: 'warn' }, () =>
           payload.create({
             collection: o.movements as CollectionSlug,
-            data: { item: idOf(fresh.item), kind: 'wasted', wasteReason: 'expired', quantity: left, lot: fresh.id, reason: `Expired (use by ${String(fresh.expiresOn).slice(0, 10)})` } as never,
+            data: { item: idOf(fresh.item), kind: 'written-off', writeOffReason: 'expired', quantity: left, lot: fresh.id, reason: `Expired (use by ${String(fresh.expiresOn).slice(0, 10)})` } as never,
             ...sys,
             req,
           }),
@@ -494,15 +494,15 @@ export async function writeOffExpired(payload: Payload, options: { now?: Date } 
 }
 
 /**
- * Suggest an item's waste allowance from what really happened over the last `days` (default 90):
- * the allowance already taken, plus recorded waste, minus what recounts found extra, as a share of
+ * Suggest an item's shrinkage allowance from what really happened over the last `days` (default 90):
+ * the allowance already taken, plus recorded write-offs, minus what recounts found extra, as a share of
  * what recipes used. Needs at least `minUses` (default 10) recipe uses; otherwise says why not.
  */
-export async function suggestWastePercent(
+export async function suggestShrinkagePercent(
   payload: Payload,
   itemID: ID,
   options: { days?: number; minUses?: number; now?: Date; req?: Req } = {},
-): Promise<{ percent: number | null; explanation: string; basis: { used: number; allowance: number; wasted: number; corrections: number; uses: number } }> {
+): Promise<{ percent: number | null; explanation: string; basis: { used: number; shrinkageAllowance: number; writtenOff: number; corrections: number; uses: number } }> {
   const o = suppliesOf(payload)
   const days = options.days ?? 90
   const minUses = options.minUses ?? 10
@@ -519,14 +519,14 @@ export async function suggestWastePercent(
   for (const m of ms) {
     const change = num(m.change) ?? 0
     if (m.kind === 'used' && idOf(m.recipe) !== null) {
-      const a = num(m.allowance) ?? 0
+      const a = num(m.shrinkageAllowance) ?? 0
       used += -change - a
       allowance += a
       uses++
-    } else if (m.kind === 'wasted') wasted += -change
+    } else if (m.kind === 'written-off') wasted += -change
     else if (m.kind === 'adjusted' && m.reason !== 'Opening stock') corrections += change
   }
-  const basis = { used: round(used), allowance: round(allowance), wasted: round(wasted), corrections: round(corrections), uses }
+  const basis = { used: round(used), shrinkageAllowance: round(allowance), writtenOff: round(wasted), corrections: round(corrections), uses }
   const unit = unitOf(item)
   if (uses < minUses || used <= 0)
     return { percent: null, basis, explanation: `Not enough history yet: ${uses} recipe use${uses === 1 ? '' : 's'} of ${nameOf(item)} in ${days} days (needs ${minUses}).` }
@@ -537,7 +537,7 @@ export async function suggestWastePercent(
     basis,
     explanation:
       `Over ${days} days recipes used ${plural(basis.used, unit)} of ${nameOf(item)}. ` +
-      `The allowance took ${plural(basis.allowance, unit)}, ${plural(basis.wasted, unit)} was recorded as waste, ` +
+      `The shrinkage allowance took ${plural(basis.shrinkageAllowance, unit)}, ${plural(basis.writtenOff, unit)} was written off, ` +
       `and counts found ${plural(Math.abs(basis.corrections), unit)} ${basis.corrections >= 0 ? 'more' : 'less'} than expected. ` +
       `That’s about ${percent}% lost.`,
   }
@@ -650,8 +650,8 @@ export type StockRow = {
   lots: LotRow[]
   /** On hand minus expired lots not yet written off. */
   usable: number
-  /** The item's own waste allowance, or the default (null when allowances are off). */
-  wastePercent: number | null
+  /** The item's own shrinkage allowance, or the default (null when allowances are off). */
+  shrinkagePercent: number | null
 }
 
 export type LotRow = { id: ID; label: string; lotNumber: string | null; expiresOn: string | null; onHand: number; expired: boolean; expiringSoon: boolean }
@@ -710,7 +710,7 @@ export async function stockReport(
       scopeName: scope && typeof scope === 'object' ? String(scope.name ?? scope.title ?? scope.slug ?? scope.id) : null,
       lots,
       usable: round(onHand - lots.filter((l) => l.expired).reduce((t, l) => t + l.onHand, 0)),
-      wastePercent: o.waste.enabled ? (percentOf(d.wastePercent) ?? o.waste.defaultPercent) : null,
+      shrinkagePercent: o.shrinkage.enabled ? (percentOf(d.shrinkagePercent) ?? o.shrinkage.defaultPercent) : null,
     }
   })
   const expiring = rows.flatMap((r) => (r.retired ? [] : r.lots.filter((l) => l.expired || l.expiringSoon).map((l) => ({ ...l, item: r }))))

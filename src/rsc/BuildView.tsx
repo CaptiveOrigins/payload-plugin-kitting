@@ -3,7 +3,7 @@ import type { AdminViewServerProps, CollectionSlug } from 'payload'
 import React from 'react'
 
 import { BuildForm } from '../client/BuildForm.js'
-import { describeUse, getItem, num, suppliesOf, wastePercent } from '../stock.js'
+import { describeUse, getItem, num, suppliesOf, shrinkagePercent } from '../stock.js'
 
 type Doc = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -26,7 +26,7 @@ export async function BuildView({ initPageResult, params, searchParams }: AdminV
         continue
       }
       const item = await getItem(req.payload, o, {}, line.item)
-      if (item) uses.push(describeUse({ quantity: num(line.quantity) ?? 0, unit: String(line.unit || item.unit), name: String(item.name), percent: wastePercent(o, item, r, line) }))
+      if (item) uses.push(describeUse({ quantity: num(line.quantity) ?? 0, unit: String(line.unit || item.unit), name: String(item.name), percent: shrinkagePercent(o, item, r, line) }))
     }
     options.push({ id: String(r.id), name: String(r.name), maxPerBatch: num(r.maxPerBatch), uses })
   }

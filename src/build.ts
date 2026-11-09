@@ -58,7 +58,7 @@ export function splitLots(lots: Map<string, { lot: ID | null; quantity: number }
 
 /**
  * Build one unit per external ID from a recipe, in one transaction: the recipe's supplies come off
- * stock (first to expire first, with the waste allowance), each unit records the lots that went into
+ * stock (first to expire first, with the shrinkage allowance), each unit records the lots that went into
  * it, and the host's `onBuild` runs for each. Refuses a batch bigger than the recipe's "most to build
  * at once", IDs already used, and (by default) not enough stock, naming what's wrong.
  */

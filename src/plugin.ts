@@ -34,7 +34,7 @@ export const kittingPlugin =
       render: options.alerts?.render,
       adminView: options.adminView ?? true,
       adminGroup: options.adminGroup ?? 'Supplies',
-      waste: { enabled: options.waste?.enabled ?? true, defaultPercent: clampPercent(options.waste?.defaultPercent) },
+      shrinkage: { enabled: options.shrinkage?.enabled ?? true, defaultPercent: clampPercent(options.shrinkage?.defaultPercent) },
       lotWarningDays: options.lots?.warningDays ?? 14,
       autoWriteOff: options.lots?.autoWriteOff ?? true,
     }

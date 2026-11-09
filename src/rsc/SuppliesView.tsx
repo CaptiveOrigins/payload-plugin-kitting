@@ -171,7 +171,7 @@ export async function SuppliesView({ initPageResult, params, searchParams }: Adm
               <section aria-labelledby="supplies-expiring">
                 <h2 id="supplies-expiring" style={{ marginTop: 0 }}>Use soon ({expiring.length})</h2>
                 <table style={table}>
-                  <caption style={caption}>Lots past or near their use-by date, first to expire first. They’re used first; expired ones are written off as waste.</caption>
+                  <caption style={caption}>Lots past or near their use-by date, first to expire first. They’re used first; expired ones are written off as shrinkage.</caption>
                   <thead>
                     <tr>
                       <th scope="col" style={cell}>Supply</th>

@@ -4,12 +4,13 @@ export type ID = string | number
 
 /**
  * What a movement does to stock. `adjusted` takes a signed change (a recount, a correction).
- * `wasted` takes stock out and counts towards the waste figures (spilled, spoiled, expired, a dud).
+ * `written-off` takes stock out as shrinkage (spoiled, damaged, defective, expired, lost) and feeds the
+ * learned shrinkage allowance.
  */
-export type MovementKind = 'received' | 'used' | 'adjusted' | 'wasted'
+export type MovementKind = 'received' | 'used' | 'adjusted' | 'written-off'
 
-/** Why stock was wasted. */
-export type WasteReason = 'spilled' | 'spoiled' | 'expired' | 'defective' | 'dud' | 'other'
+/** Why stock was written off. */
+export type WriteOffReason = 'spoiled' | 'damaged' | 'defective' | 'expired' | 'lost' | 'other'
 
 /** Where a low-stock alert stands. Empty while the item is at or above its level. */
 export type AlertStatus = 'pending' | 'sending' | 'sent' | 'not-sent' | 'failed'
@@ -60,16 +61,16 @@ export type KittingPluginOptions = {
   /** Using stock below zero: `refuse` (default) writes nothing and says what's short; `warn` goes ahead and reports it. */
   negativeStock?: NegativeStock
   /**
-   * The waste allowance: a % added to what a recipe uses, for spills, spoilage, defects and duds, so
+   * The shrinkage allowance: a % added to what a recipe uses, for stock lost to damage, spoilage, defects or errors, so
    * stock stays close to real without counting every day. `enabled: false` turns every allowance off.
    * `defaultPercent` applies to items without their own. An item, a recipe and a recipe line can each
    * set their own; the most specific wins (line, then recipe, then item, then this default).
    */
-  waste?: { enabled?: boolean; defaultPercent?: number }
+  shrinkage?: { enabled?: boolean; defaultPercent?: number }
   /**
    * Lots and use-by dates, for items with "Track lots" ticked. `warningDays` is the default for how
    * soon before a lot's use-by date it shows as expiring. With `autoWriteOff` (default true), expired
-   * lots are written off as waste when the overview is opened, and `writeOffExpired` does the same
+   * lots are written off as shrinkage when the overview is opened, and `writeOffExpired` does the same
    * from a scheduled job.
    */
   lots?: { warningDays?: number; autoWriteOff?: boolean }
@@ -117,7 +118,7 @@ export type ResolvedSupplies = {
   render?: NonNullable<KittingPluginOptions['alerts']>['render']
   adminView: boolean
   adminGroup: string
-  waste: { enabled: boolean; defaultPercent: number }
+  shrinkage: { enabled: boolean; defaultPercent: number }
   lotWarningDays: number
   autoWriteOff: boolean
 }
@@ -149,8 +150,8 @@ export type Shortage = { item: ID; name: string; unit: string; onHand: number; n
 export type ApplyRecipeResult = {
   recipe: { id: ID; name: string }
   count: number
-  /** One per item and lot used. `allowance` is the part of `change` that is the waste allowance. */
-  movements: { id: ID; item: ID; lot: ID | null; change: number; allowance: number; onHandAfter: number }[]
+  /** One per item and lot used. `shrinkageAllowance` is the part of `change` that is the shrinkage allowance. */
+  movements: { id: ID; item: ID; lot: ID | null; change: number; shrinkageAllowance: number; onHandAfter: number }[]
   /** Items that went below zero (only with `negativeStock: 'warn'`). */
   shortages: Shortage[]
 }

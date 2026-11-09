@@ -16,14 +16,14 @@ The same few words cover both: an **item** is anything you keep in stock, a **re
 | Recipes | A latte: 18 g beans, 200 ml milk, a cup, a lid. House syrup is its own recipe, used in many drinks | A sample kit: two swabs, a tube with 500 µl buffer, a label, a mailer |
 | Builds | Drinks, as they're sold | Kits, each scanned in under the ID printed on its tube |
 | Lots and use-by | Milk goes off: oldest first, out-of-date stock written off | Each buffer and swab lot has an expiry; every kit records which lots went into it |
-| Waste allowance | Spills and spoilage: "18 g of beans + 5% waste" | Failed and dud kits: a failure rate, learned from what gets recorded |
+| Shrinkage allowance | Spills and spoilage: "18 g of beans + 5% shrinkage allowance" | Failed and defective kits: a failure rate, learned from what gets written off |
 | Ready stock | (not usually) | Kits kept built and ready to send, with a recommended level |
 
 ## Levels
 
 You switch on only what you need, and the simple case stays simple:
 
-1. **Supply tracker.** Items in any unit, suppliers, lots and use-by dates, a stock log, the waste allowance and low-stock email. Nothing else. *Built.*
+1. **Supply tracker.** Items in any unit, suppliers, lots and use-by dates, a stock log, the shrinkage allowance and low-stock email. Nothing else. *Built.*
 2. **Recipes and builder.** Recipes, including recipes that use other recipes, and a builder in the admin where you scan or type each unit's external ID: its supplies come off stock and it records the lots that went into it. *Built.*
 3. **Fulfilment.** *Built:* how many ready units to keep, by one of five methods (below), and the typed contracts for a shop and a shipping plugin. *Planned:* ready units assigned to orders (natively with Payload's ecommerce plugin, or through Kitting's own API), a "build one" queue, a recommended ready-stock level learned from your sales, and box suggestions by cost, using real postage when a shipping plugin is installed.
 
@@ -31,22 +31,22 @@ Today levels 1 and 2 are always on together; the switches come with the builder.
 
 ## Built into every level
 
-- **Waste allowance.** Spills, spoilage, defects, failures and duds happen. Each item, recipe and recipe line can carry a loss allowance in %, added to what a recipe uses and recorded on each movement ("18 g of beans per drink + 5% waste allowance"). The most specific wins: line, then recipe, then item, then the site default. `waste: { enabled: false }` turns them all off, and 0 turns one off. `suggestWastePercent` suggests an item's % from what happened over the last 90 days: the allowance taken, plus recorded waste, minus what counts found extra, as a share of what recipes used. It needs 10 recipe uses first, and says so until then.
+- **Shrinkage allowance.** Shrinkage is the usual business word for stock lost to damage, spoilage, defects or errors. Each item, recipe and recipe line can carry a shrinkage allowance in %, added to what a recipe uses and recorded on each movement ("18 g of beans per drink + 5% shrinkage allowance"). The most specific wins: line, then recipe, then item, then the site default. `shrinkage: { enabled: false }` turns them all off, and 0 turns one off. `suggestShrinkagePercent` suggests an item's % from what happened over the last 90 days: the allowance taken, plus what was written off, minus what counts found extra, as a share of what recipes used. It needs 10 recipe uses first, and says so until then.
 - **Units.** Each item is counted in one unit (g, ml, µl, each…). Enter stock in any unit of the same kind (kg for g, l for µl) or in one of the item's packs ("1 kg bag" = 1000 g), and it's converted once on the way in. Recipe lines can use other units too.
-- **Lots and use-by dates** (per item, "Track lots"). Each delivery becomes a lot with its own number and use-by date, or one worked out from the item's shelf life. Stock is used first to expire first, and expired lots are never used. Every movement records its lot. Expired lots are written off as waste (`writeOffExpired`, and automatically when the overview opens). The overview lists what to use soon.
+- **Lots and use-by dates** (per item, "Track lots"). Each delivery becomes a lot with its own number and use-by date, or one worked out from the item's shelf life. Stock is used first to expire first, and expired lots are never used. Every movement records its lot. Expired lots are written off as shrinkage (`writeOffExpired`, and automatically when the overview opens). The overview lists what to use soon.
 
 *Planned:* a guided setup (your items, then your recipes, then a first stock count), and an everyday page (what's low, what to make, what to buy) in plain wording for a shop owner or a lab manager.
 
 Later, not yet: ordering from suppliers when something stays low for a few days (see [docs/roadmap.md](docs/roadmap.md)), and turning till sales into usage.
 
-**Testing so far:** 44 tests pass: 18 pure ones (units, lots, the waste allowance, every stock method against known values, and the commerce and shipping contracts with made-up doubles), and 26 against a real MongoDB (in memory, single-node replica set) on Payload 3.92: movements, units and packs, the waste allowance and its suggestion, lots used first to expire first with expired ones written off, nested recipes, the builder (lots per unit, refusals, voiding, the HTTP endpoint's access), the ready-stock recommendation, recipes, the refusal to go below zero, the low-stock email firing once, two senders racing for one alert, site isolation and access. The overview at `/admin/supplies` was checked in a local dev server of a real host app with made-up data: it renders, its headings and tables are in order, and its text and buttons measured 15:1 contrast or better in dark mode. The builder page and the new overview sections haven't been opened in a browser yet, and nothing has been tried by a person, with a keyboard or a screen reader.
+**Testing so far:** 44 tests pass: 18 pure ones (units, lots, the shrinkage allowance, every stock method against known values, and the commerce and shipping contracts with made-up doubles), and 26 against a real MongoDB (in memory, single-node replica set) on Payload 3.92: movements, units and packs, the shrinkage allowance and its suggestion, lots used first to expire first with expired ones written off, nested recipes, the builder (lots per unit, refusals, voiding, the HTTP endpoint's access), the ready-stock recommendation, recipes, the refusal to go below zero, the low-stock email firing once, two senders racing for one alert, site isolation and access. The overview at `/admin/supplies` was checked in a local dev server of a real host app with made-up data: it renders, its headings and tables are in order, and its text and buttons measured 15:1 contrast or better in dark mode. The builder page and the new overview sections haven't been opened in a browser yet, and nothing has been tried by a person, with a keyboard or a screen reader.
 
 ## What it does
 
 - **Supplies** (`supply-items`): name, unit (each, g, ml…), SKU, supplier, on hand, low-stock level, reorder quantity, notes. You give the opening stock when you add one.
 - **Suppliers**: name, order email, phone, website, usual delivery time, notes.
 - **Lots** (`supply-lots`): for items with lots tracked, one per delivery, with its number, use-by date and what's left. Made when stock is received.
-- **Stock movements** (`supply-movements`): the stock log. Received, used, wasted (spilled, spoiled, expired, defective, a dud) or adjusted (+ or −), with who, why, a reference and the lot. A movement can't be edited or deleted, even through the Local API: you fix a mistake with an adjustment. On hand is only ever changed by a movement, so it always equals the sum of the item's log, opening stock included.
+- **Stock movements** (`supply-movements`): the stock log. Received, used, written off (spoiled, damaged, defective, expired, lost) or adjusted (+ or −), with who, why, a reference and the lot. A movement can't be edited or deleted, even through the Local API: you fix a mistake with an adjustment. On hand is only ever changed by a movement, so it always equals the sum of the item's log, opening stock included.
 - **Recipes** (`supply-recipes`): what goes into one of something, as supplies × quantity in any unit that converts. A line can use another recipe: a house syrup that makes 1 litre, used 20 ml per drink, takes a fiftieth of the syrup's sugar and water each time. A recipe can't use itself, however deep. Your code calls `applyRecipe` when it makes something, and the plugin writes one `used` movement per supply and lot, in one transaction.
 - **The builder** at `/admin/supplies/build`: choose a recipe, then scan or type each unit's ID (a barcode scanner that types and presses Enter works). Building takes the supplies off stock and makes one **built unit** (`assembled-units`) per ID, each recording which lots went into it. It refuses an ID scanned twice, one already built on that site, a batch bigger than the recipe's "most to build at once", and not having enough. Units can't be made, changed or deleted by hand, only their notes. `voidUnit` takes one out of use: a dud keeps stock as it is, and "built by mistake" with `returnToStock` puts its supplies back into the lots they came from. The same is at `POST /api/kitting/build` and `/api/kitting/void` for people who may manage that recipe or unit.
 - **Going below zero** is refused by default. Nothing is written, and the error names every supply that's short and by how much. Set `negativeStock: 'warn'` to let it through and get the shortages back instead.
@@ -147,8 +147,8 @@ With `scopeField`, a recipe key needs its site: `{ key, scope }`. `{ id }` works
 | `access.read` | same as `manage` | See them |
 | `scopeField` | none | The field that separates sites, such as `tenant`. Your tenant plugin adds it |
 | `negativeStock` | `'refuse'` | Or `'warn'`. `applyRecipe` can override it per call |
-| `waste.enabled` | `true` | `false` turns every waste allowance off |
-| `waste.defaultPercent` | `0` | For items without their own |
+| `shrinkage.enabled` | `true` | `false` turns every shrinkage allowance off |
+| `shrinkage.defaultPercent` | `0` | For items without their own |
 | `lots.warningDays` | `14` | How soon before its use-by date a lot shows under "Use soon". Items can set their own |
 | `lots.autoWriteOff` | `true` | Write off expired lots when the overview opens |
 | `alerts.recipients` | none | A list, or `({ payload, item }) => string[]` (`item.scope` is the site) |
@@ -167,8 +167,8 @@ Movements can't be edited or deleted whatever `access` says. A trusted cleanup s
 - When an admin records a movement, the email goes out at the end of the save, just before it's committed. If that final commit fails, an email can arrive for a change that didn't stick.
 - Quantities can be fractional and are rounded to six decimal places.
 - A lot's use-by date is a day; the whole day is usable, and it's compared in UTC.
-- With an allowance on, everyday spills are covered by it: record waste only for the unusual (a dropped bag, a failed batch), or it's counted twice until the next count corrects it.
-- Waste allowances are set in config and on each item and recipe. A site-wide setting in the admin is planned.
+- With an allowance on, everyday losses are covered by it: write off only the unusual (a dropped bag, a failed batch), or it's counted twice until the next count corrects it.
+- Shrinkage allowances are set in config and on each item and recipe. A site-wide setting in the admin is planned.
 
 ## Development
 
