@@ -4,7 +4,7 @@ import { MongoMemoryReplSet } from 'mongodb-memory-server'
 import { buildConfig, getPayload, type Access, type CollectionConfig, type Field, type Payload } from 'payload'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
-import { applyRecipe, assignUnits, recommendBoxes, buildUnits, recommendReadyStock, release, shipUnits, swapUnit, kittingPlugin, KittingError, voidUnit, sendPendingAlerts, stockReport, suggestShrinkagePercent, writeOffExpired } from '../src/index.js'
+import { applyRecipe, assignUnits, recommendBoxes, setupProgress, stockCount, buildUnits, recommendReadyStock, release, shipUnits, swapUnit, kittingPlugin, KittingError, voidUnit, sendPendingAlerts, stockReport, suggestShrinkagePercent, writeOffExpired } from '../src/index.js'
 
 // Made-up data throughout: example.com addresses, invented supplies and sites.
 type Doc = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -832,5 +832,65 @@ describe('accepting a suggested number to keep', () => {
     expect((await get('supply-recipes', recipe.id)).readyStock?.baseline ?? null).toBeNull()
     expect((await call(staffA, 4)).status).toBe(200)
     expect(await get('supply-recipes', recipe.id)).toMatchObject({ readyStock: { baseline: 4 }, stockState: 'build-more' })
+  })
+})
+
+describe('stock count and getting started', () => {
+  const run = () => Math.random().toString(36).slice(2, 7).toUpperCase()
+
+  it('records each difference as one adjustment, leaves matches alone, and takes shortfalls off old lots first', async () => {
+    const cups = await create('supply-items', { tenant: siteA.id, name: `Count cups ${run()}`, unit: 'each', openingStock: 10 })
+    const lids = await create('supply-items', { tenant: siteA.id, name: `Count lids ${run()}`, unit: 'each', openingStock: 5 })
+    const milk = await create('supply-items', { tenant: siteA.id, name: `Count milk ${run()}`, unit: 'ml', trackLots: true, openingStock: 1000, openingLotNumber: 'OLD', openingExpiresOn: '2020-01-01T00:00:00.000Z' })
+    await create('supply-movements', { item: milk.id, kind: 'received', quantity: 2000, lotNumber: 'NEW', expiresOn: '2099-01-01T00:00:00.000Z' }, as(staffA))
+    const before = (await movementsOf(lids)).length
+    const result = await stockCount(payload, [
+      { item: cups.id, counted: 7 },
+      { item: lids.id, counted: 5 },
+      { item: milk.id, counted: 1500 },
+    ])
+    expect(result.changed.map((c) => [c.before, c.after, c.change])).toEqual([
+      [10, 7, -3],
+      [3000, 1500, -1500],
+    ])
+    expect((await movementsOf(lids)).length).toBe(before)
+    expect((await movementsOf(cups)).at(-1)).toMatchObject({ kind: 'adjusted', change: -3, reason: 'Stock count' })
+    const lots = Object.fromEntries(((await payload.find({ collection: 'supply-lots' as never, where: { item: { equals: milk.id } }, depth: 0 })).docs as Doc[]).map((l) => [l.lotNumber, l.onHand]))
+    expect(lots).toEqual({ OLD: 0, NEW: 1500 }) // the expired lot went first, then 500 of the new one
+    expect((await get('supply-items', milk.id)).onHand).toBe(1500)
+    // Extra goes into the newest lot.
+    await stockCount(payload, [{ item: milk.id, counted: 1600 }])
+    expect(((await payload.find({ collection: 'supply-lots' as never, where: { and: [{ item: { equals: milk.id } }, { lotNumber: { equals: 'NEW' } }] }, depth: 0 })).docs[0] as Doc).onHand).toBe(1600)
+  })
+
+  it('refuses bad counts and writes nothing', async () => {
+    const cups = await create('supply-items', { tenant: siteA.id, name: `Bad count ${run()}`, unit: 'each', openingStock: 10 })
+    const before = (await movementsOf(cups)).length
+    for (const counts of [[{ item: cups.id, counted: -1 }], [{ item: cups.id, counted: Number.NaN }], [{ item: cups.id, counted: 3 }, { item: cups.id, counted: 4 }], []])
+      await expect(stockCount(payload, counts)).rejects.toBeInstanceOf(KittingError)
+    expect((await movementsOf(cups)).length).toBe(before)
+  })
+
+  it('counts over HTTP only what the person may manage, all or nothing', async () => {
+    const a = await create('supply-items', { tenant: siteA.id, name: `HTTP count A ${run()}`, unit: 'each', openingStock: 10 })
+    const b = await create('supply-items', { tenant: siteB.id, name: `HTTP count B ${run()}`, unit: 'each', openingStock: 10 })
+    const endpoint = payload.config.endpoints.find((e) => e.path === '/kitting/count')!
+    const call = (user: Doc | null, counts: unknown) => endpoint.handler({ payload, user: user && { ...user, collection: 'users' }, json: async () => ({ counts }) } as never) as Promise<Response>
+    expect((await call(null, [{ item: a.id, counted: 1 }])).status).toBe(401)
+    expect((await call(viewerA, [{ item: a.id, counted: 1 }])).status).toBe(403)
+    // One supply from another site refuses the whole count.
+    expect((await call(staffA, [{ item: a.id, counted: 1 }, { item: b.id, counted: 1 }])).status).toBe(403)
+    expect([(await get('supply-items', a.id)).onHand, (await get('supply-items', b.id)).onHand]).toEqual([10, 10])
+    // An empty box isn't zero.
+    expect((await call(staffA, [{ item: a.id, counted: '' }])).status).toBe(400)
+    expect((await call(staffA, [{ item: a.id, counted: 8 }])).status).toBe(200)
+    expect((await get('supply-items', a.id)).onHand).toBe(8)
+  })
+
+  it('tracks the getting-started steps per person', async () => {
+    const p = await setupProgress(payload, { user: { ...staffB, collection: 'users' } })
+    expect(p.supplies).toBeGreaterThan(0)
+    expect(typeof p.counted).toBe('boolean')
+    expect(await setupProgress(payload, { user: { ...staffA, collection: 'users' } })).toMatchObject({ counted: true })
   })
 })

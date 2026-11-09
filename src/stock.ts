@@ -723,3 +723,77 @@ export async function stockReport(
   expiring.sort(byExpiry)
   return { rows, below: rows.filter((r) => r.below), expiring }
 }
+
+export type CountLine = { item: ID; counted: number }
+export type CountResult = { counted: number; changed: { item: ID; name: string; unit: string; before: number; after: number; change: number }[] }
+
+/**
+ * A stock count: for each supply, what's really there, in its own unit. Each difference becomes one
+ * `adjusted` movement ("Stock count"), all in one transaction; supplies that match are left alone. With
+ * lots, a shortfall comes off the first to expire (expired lots first, as they're usually what's gone),
+ * and extra goes into the newest lot. Pass `req` with a user to check they may manage every supply.
+ */
+export async function stockCount(payload: Payload, lines: CountLine[], options: { req?: Req; user?: { id: ID } | null; reason?: string } = {}): Promise<CountResult> {
+  const o = suppliesOf(payload)
+  if (!lines.length) throw new KittingError('noCounts', 'Enter at least one count.')
+  const seen = new Set<string>()
+  for (const l of lines) {
+    if (!(typeof l.counted === 'number' && Number.isFinite(l.counted) && l.counted >= 0)) throw new KittingError('quantity', 'A count is a number, 0 or more.')
+    if (seen.has(String(l.item))) throw new KittingError('duplicate', 'A supply is counted twice.')
+    seen.add(String(l.item))
+  }
+  const joined = Boolean(options.req?.transactionID)
+  const result = await transaction(payload, options.req, async (req) => {
+    const by = idOf(options.user ?? req.user ?? null)
+    const changed: CountResult['changed'] = []
+    for (const line of lines) {
+      const item = await getItem(payload, o, req, line.item)
+      if (!item) throw new KittingError('itemNotFound', 'A counted supply doesn’t exist.')
+      if (req.user && !(await mayManage(req as PayloadRequest, o, item.id))) throw new KittingError('forbidden', `You can’t count ${nameOf(item)}.`)
+      const before = num(item.onHand) ?? 0
+      const counted = round(line.counted)
+      const diff = round(counted - before)
+      if (diff === 0) continue
+      const reason = options.reason ?? 'Stock count'
+      const parts: { lot: ID | null; quantity: number }[] = []
+      if (item.trackLots && diff < 0) {
+        // Gone first: expired lots, then first to expire; then stock from before lots were tracked.
+        const lots = (await lotsOf(payload, o, req, item.id)).filter((l) => (num(l.onHand) ?? 0) > 0)
+        const ordered = [...lots.filter((l) => isExpired(l.expiresOn)), ...lots.filter((l) => !isExpired(l.expiresOn))]
+        let left = -diff
+        for (const lot of ordered) {
+          if (left <= 0) break
+          const take = round(Math.min(num(lot.onHand) as number, left))
+          parts.push({ lot: lot.id, quantity: -take })
+          left = round(left - take)
+        }
+        if (left > 0) parts.push({ lot: null, quantity: -left })
+      } else parts.push({ lot: null, quantity: diff })
+      for (const part of parts)
+        await asInternal(req, { by, negativeStock: 'warn' }, () =>
+          payload.create({ collection: o.movements as CollectionSlug, data: { item: item.id, kind: 'adjusted', quantity: part.quantity, unit: unitOf(item), lot: part.lot, reason } as never, ...sys, req }),
+        )
+      changed.push({ item: item.id, name: nameOf(item), unit: unitOf(item), before, after: counted, change: diff })
+    }
+    await refreshStockStates(payload, { req })
+    return { counted: lines.length, changed }
+  })
+  if (!joined) await sendPendingAlerts(payload).catch((error) => payload.logger.error({ err: error, msg: 'kitting: low-stock alerts not sent' }))
+  return result
+}
+
+/** How far a site has got with setting up: the guided setup's checklist. */
+export async function setupProgress(payload: Payload, options: { user?: Doc | null; req?: Req } = {}) {
+  const o = suppliesOf(payload)
+  const access = options.user !== undefined ? { overrideAccess: false, user: options.user } : { overrideAccess: true }
+  const count = async (collection: string, where?: Where) => (await payload.count({ collection: collection as CollectionSlug, where, ...access, req: options.req })).totalDocs
+  const supplies = await count(o.items)
+  const recipes = await count(o.recipes)
+  const counts = await count(o.movements, { reason: { equals: 'Stock count' } })
+  return {
+    supplies,
+    recipes,
+    counted: counts > 0,
+    done: supplies > 0 && recipes > 0 && counts > 0,
+  }
+}

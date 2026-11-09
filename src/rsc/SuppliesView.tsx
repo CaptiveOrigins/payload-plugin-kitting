@@ -7,7 +7,7 @@ import type { CollectionSlug } from 'payload'
 import { recommendReadyStock } from '../build.js'
 import { AcceptBaseline } from '../client/AcceptBaseline.js'
 import { readyStatus, STATE_TEXT, type ReadyStatus } from '../readystock.js'
-import { sendPendingAlerts, stockReport, suppliesOf, writeOffExpired, type StockRow } from '../stock.js'
+import { sendPendingAlerts, setupProgress, stockReport, suppliesOf, writeOffExpired, type StockRow } from '../stock.js'
 import type { Recommendation } from '../stocklevel.js'
 
 const METHOD_NAMES: Record<string, string> = {
@@ -74,6 +74,9 @@ export async function SuppliesView({ initPageResult, params, searchParams }: Adm
     )
     ready.push({ status: await readyStatus(req.payload, r), recs: (await recommendReadyStock(req.payload, r.id)).recommendations, waiting })
   }
+  const setup = canManage ? await setupProgress(req.payload, { user: req.user }) : null
+  const toBuild = ready.filter((x) => x.status.state === 'build-more' || x.status.state === 'urgent')
+  const waitingTotal = ready.reduce((t, x) => t + x.waiting, 0)
   const current = rows.filter((r) => !r.retired)
   const retired = rows.filter((r) => r.retired)
   const showScope = Boolean(o.scopeField) && new Set(rows.map((r) => String(r.scope))).size > 1
@@ -128,6 +131,7 @@ export async function SuppliesView({ initPageResult, params, searchParams }: Adm
             <nav aria-label="Supplies actions">
               <ul style={{ display: 'flex', gap: 8, flexWrap: 'wrap', listStyle: 'none', padding: 0, margin: 0 }}>
                 <li><a className="btn btn--style-primary btn--size-small" style={{ margin: 0 }} href={`${admin}/supplies/build`}>Build</a></li>
+                <li><a className="btn btn--style-secondary btn--size-small" style={{ margin: 0 }} href={`${admin}/supplies/count`}>Count stock</a></li>
                 <li><a className="btn btn--style-secondary btn--size-small" style={{ margin: 0 }} href={`${admin}/collections/${o.movements}/create`}>Record a movement</a></li>
                 <li><a className="btn btn--style-secondary btn--size-small" style={{ margin: 0 }} href={`${admin}/collections/${o.items}/create`}>Add a supply</a></li>
                 <li><a className="btn btn--style-secondary btn--size-small" style={{ margin: 0 }} href={`${admin}/collections/${o.recipes}`}>Recipes</a></li>
@@ -139,6 +143,39 @@ export async function SuppliesView({ initPageResult, params, searchParams }: Adm
                 <li><a className="btn btn--style-secondary btn--size-small" style={{ margin: 0 }} href={`${admin}/collections/${o.movements}`}>Stock log</a></li>
               </ul>
             </nav>
+
+            {setup && !setup.done && (
+              <p style={{ margin: 0, padding: 12, borderRadius: 4, border: '1px solid var(--theme-elevation-300)' }}>
+                {[setup.supplies > 0, setup.recipes > 0, setup.counted].filter(Boolean).length} of 3 setup steps done. <a href={`${admin}/supplies/setup`}>Finish getting started</a>
+              </p>
+            )}
+
+            <section aria-labelledby="supplies-today">
+              <h2 id="supplies-today" style={{ marginTop: 0 }}>Today</h2>
+              <ul style={{ margin: 0, paddingInlineStart: 20 }}>
+                <li>
+                  {below.length ? (
+                    <a href="#supplies-reorder">
+                      Buy: {below.length} suppl{below.length === 1 ? 'y' : 'ies'} below level, from {groups.length} supplier{groups.length === 1 ? '' : 's'}
+                    </a>
+                  ) : (
+                    'Buy: nothing is below its level'
+                  )}
+                </li>
+                {ready.length > 0 && (
+                  <li>
+                    {toBuild.length || waitingTotal ? (
+                      <a href="#supplies-ready">
+                        Build: {[...toBuild.map((x) => `${x.status.toBuild} × ${x.status.recipe.name}${x.status.state === 'urgent' ? ' (urgent: supplies low)' : ''}`), ...(waitingTotal ? [`${waitingTotal} waiting for orders`] : [])].join('; ')}
+                      </a>
+                    ) : (
+                      'Build: enough ready'
+                    )}
+                  </li>
+                )}
+                <li>{expiring.length ? <a href="#supplies-expiring">Use soon: {expiring.length} lot{expiring.length === 1 ? '' : 's'} near or past use-by</a> : 'Use soon: nothing near its use-by date'}</li>
+              </ul>
+            </section>
 
             <section aria-labelledby="supplies-reorder">
               <h2 id="supplies-reorder" style={{ marginTop: 0 }}>Below level{below.length ? ` (${below.length})` : ''}</h2>
@@ -243,7 +280,7 @@ export async function SuppliesView({ initPageResult, params, searchParams }: Adm
                       </tbody>
                     </table>
                     {recs.some((rec, i) => i > 0 && rec.fallback) ? (
-                      <p style={{ margin: '8px 0 0', fontSize: 13 }}>Methods that need more sales history aren’t shown yet: {recs.filter((rec, i) => i > 0 && rec.fallback).map((rec) => METHOD_NAMES[rec.method]).join(', ')}.</p>
+                      <p style={{ margin: '8px 0 0', fontSize: 13 }}>Not shown until they have what they need (more sales history, or a minimum and maximum): {recs.filter((rec, i) => i > 0 && rec.fallback).map((rec) => METHOD_NAMES[rec.method]).join(', ')}.</p>
                     ) : null}
                   </section>
                 ))}

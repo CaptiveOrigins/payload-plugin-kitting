@@ -70,3 +70,20 @@ Each audit maps what the plugin promises (README, docs/decisions.md) to the test
 - **Two packers scanning the same unit at the same moment.** Both write the same unit document, so MongoDB aborts one with a write conflict; the Kits side retries once, then asks to try again. A reliable race test would be slow and flaky.
 - **Screen reader.** That's the owner's test T14. The keyboard-only flow was checked in a browser.
 - **Payments in the ecommerce test.** Kitting only reads orders, so payments are out of scope.
+
+## 2026-11-09, third audit (after getting started, stock count and Today)
+
+65 tests: 20 pure, 44 against an in-memory replica set, and 1 with Payload's real ecommerce plugin.
+
+### New promises and their tests
+
+| Promise | Tests |
+|---|---|
+| A count records each difference once and leaves matches alone. With lots, a shortfall comes off expired lots, then the first to expire; extra goes into the newest lot | stock count: records each difference… |
+| Bad counts (negative, not a number, a supply twice, none at all) are refused, and nothing is written | stock count: refuses bad counts… |
+| **Access**: counting over HTTP needs a signed-in person who may manage every supply in the count. One supply from another site refuses the whole count, and an empty box is never read as zero | stock count: counts over HTTP… |
+| Getting-started progress follows what the person can see | stock count: tracks the getting-started steps… |
+
+### Checked in a browser, not in tests
+
+The setup page, the count page (keyboard only, with an invalid box blocking Save) and the Today summary, in a local dev server of the host app with made-up data. Rendering them in tests needs the full Next admin, so it's skipped, as before.

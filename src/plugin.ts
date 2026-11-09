@@ -86,6 +86,8 @@ export const kittingPlugin =
                 ...components.views,
                 supplies: { Component: '@captiveorigins/payload-plugin-kitting/rsc#SuppliesView', path: '/supplies', exact: true },
                 suppliesBuild: { Component: '@captiveorigins/payload-plugin-kitting/rsc#BuildView', path: '/supplies/build', exact: true },
+                suppliesCount: { Component: '@captiveorigins/payload-plugin-kitting/rsc#CountView', path: '/supplies/count', exact: true },
+                suppliesSetup: { Component: '@captiveorigins/payload-plugin-kitting/rsc#SetupView', path: '/supplies/setup', exact: true },
               },
             },
           }

@@ -1,7 +1,7 @@
 import type { Endpoint, PayloadRequest } from 'payload'
 
 import { buildUnits, mayManageDoc, voidUnit, type VoidReason } from './build.js'
-import { KittingError, sendPendingAlerts, suppliesOf } from './stock.js'
+import { KittingError, sendPendingAlerts, stockCount, suppliesOf } from './stock.js'
 import type { ID } from './types.js'
 
 type Body = Record<string, unknown>
@@ -50,6 +50,25 @@ export const kittingEndpoints: Endpoint[] = [
         await sendPendingAlerts(req.payload).catch(() => undefined)
         return { recipe: recipe.id, baseline: value }
       }),
+  },
+  {
+    path: '/kitting/count',
+    method: 'post',
+    handler: async (req) => {
+      const o = suppliesOf(req.payload)
+      if (!req.user || req.user.collection !== o.userSlug) return json({ message: 'Sign in first.' }, 401)
+      if (!(await o.manage({ req } as never))) return json({ message: 'You can’t do that here.' }, 403)
+      const body: Body = typeof req.json === 'function' ? ((await req.json().catch(() => ({}))) as Body) : {}
+      const counts = Array.isArray(body.counts) ? (body.counts as { item: ID; counted: unknown }[]) : []
+      try {
+        // Each supply is checked against the person's access inside stockCount.
+        return json(await stockCount(req.payload, counts.map((c) => ({ item: c.item, counted: typeof c.counted === 'number' ? c.counted : Number.NaN })), { req: { user: req.user, payload: req.payload } as PayloadRequest }))
+      } catch (error) {
+        if (error instanceof KittingError) return json({ code: error.code, message: error.message }, error.code === 'forbidden' ? 403 : 400)
+        req.payload.logger.error({ err: error, msg: 'kitting: count failed' })
+        return json({ message: 'Something went wrong; nothing was changed.' }, 500)
+      }
+    },
   },
   {
     path: '/kitting/void',
