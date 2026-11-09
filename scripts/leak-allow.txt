@@ -1,0 +1,2 @@
+# A package checksum in package-lock.json (undici 7.30.1). Random letters that happen to contain a private term as a whole word; not private.
+sha512-03KrMbjIFDWQR5RNPrSw3bd1r12JpyFQl9/yxjUbJtqkjmllqC5lFjZh6ujeuJCKr8EOQvRW872Oy/az+nLYxg==
