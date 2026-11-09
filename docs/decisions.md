@@ -104,3 +104,14 @@ The owner: "Our point should be that anyone could use it from a cafe to a genomi
   - **A genomics lab:** swabs, tubes, buffers, reagent lots, and sample kits with an external ID, lot and expiry tracking, and failure rates as the dud allowance.
 - Every term stays neutral ("item", "recipe", "build", "assembled unit", "external ID"), so neither domain feels bolted on.
 - Lot and batch tracking with expiry is planned. **Each built unit records which lots it used**, so a bad lot can be traced to every unit it went into.
+
+## 2026-11-08 (made while building layers 1 to 3; the owner can change them)
+
+- **Waste allowance.** It is taken off stock with each use, so stock stays close to real without daily counting. Recorded waste (`wasted` movements) is for the unusual. The learned % is (allowance taken + recorded waste − what counts found extra) ÷ what recipes used, over 90 days, once there are 10 recipe uses.
+- **Waste settings.** The most specific setting wins: line, then recipe, then item, then the site default. The global switch and the default are set in config for now; an admin setting is planned.
+- **Use-by dates.** A use-by date is a whole usable day, compared in UTC. Expired lots are never used, and are written off as `wasted` (expired).
+- **Recording stock out by hand** on an item with lots takes the first-to-expire lot that covers the quantity. If no single lot does, it asks for one movement per lot.
+- **Nested recipes** expand into their supplies at use time (no stock of the in-between, such as syrup). Making a batch into its own stock is a possible later addition. Nesting goes 8 deep at most, and a recipe can never use itself.
+- **Built units.** External IDs are unique per site. Units are made only by the builder and can't be deleted. Only their notes can be edited by hand.
+- **Voiding a unit.** A dud keeps stock as it is: its supplies were used. "Built by mistake" with return-to-stock puts the supplies back into the same lots.
+- **Ready stock** is capped at the recipe's "most to build at once", as the owner asked. Demand counts from the first sale, weighted with a 30-day half-life, and needs 28 days of history before a method is trusted.
