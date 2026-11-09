@@ -68,3 +68,12 @@ describe('lots', () => {
     expect(allocate({ onHand: 3 }, [], 5, now)).toEqual([{ lot: null, quantity: 5 }])
   })
 })
+
+describe('plugin set-up', () => {
+  it('refuses to replace a host collection with the same slug', async () => {
+    const { kittingPlugin } = await import('../src/index.js')
+    const config = { collections: [{ slug: 'box-types', fields: [] }] } as never
+    expect(() => kittingPlugin()(config)).toThrow(/box-types already exists in this config\. Give Kitting other slugs/)
+    expect(() => kittingPlugin({ slugs: { boxes: 'kitting-boxes' } })(config)).not.toThrow()
+  })
+})

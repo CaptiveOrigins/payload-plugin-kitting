@@ -65,11 +65,15 @@ export const kittingPlugin =
       apply(boxesCollection(o), ov.boxes),
       apply(postageCollection(o), ov.postage),
     ]
+    // Never replace a host's own collection: a clash stops startup and says how to fix it.
+    const clash = (config.collections ?? []).filter((c) => added.some((a) => a.slug === c.slug)).map((c) => c.slug)
+    if (clash.length)
+      throw new Error(`Kitting: the collection${clash.length > 1 ? 's' : ''} ${clash.join(', ')} already exist${clash.length > 1 ? '' : 's'} in this config. Give Kitting other slugs with its \`slugs\` option.`)
     const components = config.admin?.components ?? {}
     return {
       ...config,
       custom: { ...config.custom, kitting: o },
-      collections: [...withEcommerce(o, (config.collections ?? []).filter((c) => !added.some((a) => a.slug === c.slug))), ...added],
+      collections: [...withEcommerce(o, config.collections ?? []), ...added],
       endpoints: [...(config.endpoints ?? []), ...kittingEndpoints],
       admin: o.adminView
         ? {
