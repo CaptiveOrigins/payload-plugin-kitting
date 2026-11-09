@@ -1,4 +1,5 @@
 export { kittingPlugin } from './plugin.js'
+export { assignUnits, fillRequests, release, shipUnits, swapUnit } from './fulfil.js'
 export { buildUnits, cleanExternalIds, recommendReadyStock, splitLots, voidUnit, type VoidReason } from './build.js'
 export {
   compareMethods,
@@ -36,6 +37,8 @@ export type {
   AlertStatus,
   ApplyRecipeContext,
   ApplyRecipeResult,
+  AssignContext,
+  AssignResult,
   BuildContext,
   BuildResult,
   BuiltUnit,

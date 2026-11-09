@@ -1,6 +1,7 @@
 import type { CollectionSlug, Payload, PayloadRequest, Where } from 'payload'
 
 import { asInternal, findRecipe, idOf, KittingError, num, planRecipe, round, sameID, sendPendingAlerts, suppliesOf, transaction, useNeeds } from './stock.js'
+import { fillRequests } from './fulfil.js'
 import { compareMethods, dailyDemand, settingsFromRecipe, type Recommendation } from './stocklevel.js'
 import type { BuildContext, BuildResult, BuiltUnit, ID, LotUse, RecipeRef, ResolvedSupplies } from './types.js'
 
@@ -115,7 +116,14 @@ export async function buildUnits(payload: Payload, recipe: RecipeRef, externalId
       if (o.onBuild) await o.onBuild({ payload, req, unit, recipe: { id: r.id, name: String(r.name), key: String(r.key) } })
       units.push(unit)
     }
-    return { recipe: { id: r.id as ID, name: String(r.name) }, units, movements: used.movements, shortages: used.shortages }
+    const queued = context.fillRequests === false ? [] : await fillRequests(payload, req, r, units)
+    return {
+      recipe: { id: r.id as ID, name: String(r.name) },
+      units,
+      movements: used.movements,
+      shortages: used.shortages,
+      filled: queued.map((q) => ({ externalId: q.unit.externalId, request: q.request, reference: q.reference })),
+    }
   })
   if (!joined) await sendPendingAlerts(payload).catch((error) => payload.logger.error({ err: error, msg: 'kitting: low-stock alerts not sent' }))
   return result

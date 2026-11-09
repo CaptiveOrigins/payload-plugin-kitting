@@ -25,7 +25,7 @@ You switch on only what you need, and the simple case stays simple:
 
 1. **Supply tracker.** Items in any unit, suppliers, lots and use-by dates, a stock log, the shrinkage allowance and low-stock email. Nothing else. *Built.*
 2. **Recipes and builder.** Recipes, including recipes that use other recipes, and a builder in the admin where you scan or type each unit's external ID: its supplies come off stock and it records the lots that went into it. *Built.*
-3. **Fulfilment.** *Built:* how many ready units to keep, by one of five methods (below), and the typed contracts for a shop and a shipping plugin. *Planned:* ready units assigned to orders (natively with Payload's ecommerce plugin, or through Kitting's own API), a "build one" queue, a recommended ready-stock level learned from your sales, and box suggestions by cost, using real postage when a shipping plugin is installed.
+3. **Fulfilment.** *Built:* ready units assigned to orders with a "build one" queue that later builds fill, a scan-time swap and release for packing, how many ready units to keep by one of five methods (below), and the typed contracts for a shop and a shipping plugin. *Planned:* the rest of (natively with Payload's ecommerce plugin, or through Kitting's own API), a "build one" queue, a recommended ready-stock level learned from your sales, and box suggestions by cost, using real postage when a shipping plugin is installed.
 
 Today levels 1 and 2 are always on together; the switches come with the builder.
 
@@ -39,7 +39,7 @@ Today levels 1 and 2 are always on together; the switches come with the builder.
 
 Later, not yet: ordering from suppliers when something stays low for a few days (see [docs/roadmap.md](docs/roadmap.md)), and turning till sales into usage.
 
-**Testing so far:** 49 tests pass (audited 2026-11-08, see [docs/test-audit.md](docs/test-audit.md)): 18 pure ones (units, lots, the shrinkage allowance, every stock method against known values, and the commerce and shipping contracts with made-up doubles), and 31 against a real MongoDB (in memory, single-node replica set) on Payload 3.92: movements, units and packs, the shrinkage allowance and its suggestion, lots used first to expire first with expired ones written off, nested recipes, the builder (lots per unit, refusals, voiding, the HTTP endpoint's access), the ready-stock recommendation, recipes, the refusal to go below zero, the low-stock email firing once, two senders racing for one alert, site isolation and access. The overview at `/admin/supplies` was checked in a local dev server of a real host app with made-up data: it renders, its headings and tables are in order, and its text and buttons measured 15:1 contrast or better in dark mode. The builder page and the new overview sections haven't been opened in a browser yet, and nothing has been tried by a person, with a keyboard or a screen reader.
+**Testing so far:** 53 tests pass (audited 2026-11-08, see [docs/test-audit.md](docs/test-audit.md)): 18 pure ones (units, lots, the shrinkage allowance, every stock method against known values, and the commerce and shipping contracts with made-up doubles), and 35 against a real MongoDB (in memory, single-node replica set) on Payload 3.92: movements, units and packs, the shrinkage allowance and its suggestion, lots used first to expire first with expired ones written off, nested recipes, the builder (lots per unit, refusals, voiding, the HTTP endpoint's access), the ready-stock recommendation, assigning, queueing, swapping and releasing units for orders, recipes, the refusal to go below zero, the low-stock email firing once, two senders racing for one alert, site isolation and access. The overview at `/admin/supplies` was checked in a local dev server of a real host app with made-up data: it renders, its headings and tables are in order, and its text and buttons measured 15:1 contrast or better in dark mode. The builder page and the new overview sections haven't been opened in a browser yet, and nothing has been tried by a person, with a keyboard or a screen reader.
 
 ## What it does
 
@@ -79,6 +79,27 @@ export default buildConfig({
 ```
 
 Then run `payload generate:importmap`, because the overview is an admin view.
+
+## Orders
+
+```ts
+import { assignUnits, release, shipUnits, swapUnit } from '@captiveorigins/payload-plugin-kitting'
+
+// Keep 3 kits for an order: ready ones first (oldest built first), a build request for the rest.
+// Running it again for the same reference adds only the difference.
+await assignUnits(payload, { key: 'sample-kit' }, 3, { reference: 'Order 1042', scope: siteId, req })
+
+// At packing, the scanned unit decides. It fills a place the order is waiting for, or takes the place
+// of one it already holds, which goes back to ready.
+await swapUnit(payload, { reference: 'Order 1042', take: { externalId: 'ZX-1001' }, scope: siteId, req })
+
+await shipUnits(payload, [unitId], { req })
+// Unpacking one, or a cancelled order (all its units back to ready, its requests cancelled).
+await release(payload, { reference: 'Order 1042', unit: { externalId: 'ZX-1001' }, scope: siteId, req })
+await release(payload, { reference: 'Order 1042', scope: siteId, req })
+```
+
+Build requests (`build-requests`) list what's waiting, oldest first. A build gives its new units to them first, in order; pass `fillRequests: false` to `buildUnits` to keep a batch ready instead. Requests can't be made by hand, only cancelled.
 
 ## How many to keep ready
 

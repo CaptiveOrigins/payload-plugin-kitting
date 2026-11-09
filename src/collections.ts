@@ -338,6 +338,7 @@ export function movementsCollection(o: ResolvedSupplies): CollectionConfig {
 const KEY = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
 const MAX_DEPTH = 8
+const STOCK_STATE_FIELDS = ['stockState', 'stockStateSince', 'stockAlertStatus', 'stockAlertNote'] as const
 
 /** A recipe can use other recipes, but never itself, however deep. */
 async function refuseCycle(req: PayloadRequest, o: ResolvedSupplies, selfID: unknown, lines: Doc[]) {
@@ -389,6 +390,8 @@ export function recipesCollection(o: ResolvedSupplies): CollectionConfig {
     if (data.makes !== undefined && data.makes !== null && !(typeof data.makes === 'number' && data.makes > 0)) throw new KittingError('makes', '“Makes” is more than zero.')
     if (data.makesUnit !== undefined) data.makesUnit = normalizeUnit(data.makesUnit) || 'each'
     await refuseCycle(req, o, originalDoc?.id ?? null, (data.lines ?? originalDoc?.lines ?? []) as Doc[])
+    // The ready-stock state and its email change only through Kitting.
+    if (!req.context?.[INTERNAL]) for (const f of STOCK_STATE_FIELDS) data[f] = originalDoc?.[f] ?? null
     return data
   }
   return {
@@ -512,12 +515,58 @@ export function recipesCollection(o: ResolvedSupplies): CollectionConfig {
           {
             type: 'row',
             fields: [
+              {
+                name: 'baseline',
+                type: 'number',
+                min: 0,
+                label: 'Keep this many ready',
+                admin: { width: '50%', description: 'The number you’ve accepted. The overview suggests one; it never changes this by itself.' },
+              },
+              {
+                name: 'suppliesLowWhen',
+                type: 'select',
+                defaultValue: 'either',
+                label: 'Supplies count as low when',
+                options: [
+                  { label: 'Either of these', value: 'either' },
+                  { label: 'A supply is below its level', value: 'below-level' },
+                  { label: 'There isn’t enough to build up to the number above', value: 'cannot-reach' },
+                ],
+                admin: { width: '50%' },
+              },
+            ],
+          },
+          {
+            type: 'row',
+            fields: [
               { name: 'min', type: 'number', min: 0, label: 'Minimum', admin: { width: '50%', description: 'For “Minimum and maximum”: build when ready stock falls to this.' } },
               { name: 'max', type: 'number', min: 0, label: 'Maximum', admin: { width: '50%', description: '…up to this.' } },
             ],
           },
         ],
       },
+      {
+        name: 'unitWeight',
+        type: 'number',
+        min: 0,
+        label: 'Weight of one, packed (g)',
+        admin: { position: 'sidebar', description: 'For box suggestions and postage.' },
+      },
+      {
+        name: 'stockState',
+        type: 'select',
+        label: 'Ready stock',
+        options: [
+          { label: 'OK', value: 'ok' },
+          { label: 'Supplies low (enough ready)', value: 'info' },
+          { label: 'Build more', value: 'build-more' },
+          { label: 'Urgent: few ready and supplies low', value: 'urgent' },
+        ],
+        admin: { position: 'sidebar', readOnly: true },
+      },
+      { name: 'stockStateSince', type: 'date', label: 'Since', admin: { position: 'sidebar', readOnly: true, date: { pickerAppearance: 'dayAndTime' } } },
+      { name: 'stockAlertStatus', type: 'select', label: 'Ready-stock email', options: ['pending', 'sending', 'sent', 'not-sent', 'failed'].map((v) => ({ label: v, value: v })), admin: { position: 'sidebar', readOnly: true } },
+      { name: 'stockAlertNote', type: 'text', label: 'Email note', admin: { position: 'sidebar', readOnly: true } },
       { name: 'notes', type: 'textarea', label: 'Notes' },
     ],
   }
@@ -650,6 +699,7 @@ export function unitsCollection(o: ResolvedSupplies): CollectionConfig {
       { name: 'reference', type: 'text', label: 'Reference', admin: { readOnly: true, position: 'sidebar' } },
       { name: 'assignedTo', type: 'text', label: 'Assigned to', admin: { readOnly: true, position: 'sidebar', description: 'The order it went to.' } },
       { name: 'assignedAt', type: 'date', label: 'Assigned', admin: { readOnly: true, position: 'sidebar', date: { pickerAppearance: 'dayAndTime' } } },
+      { name: 'shippedAt', type: 'date', label: 'Shipped', admin: { readOnly: true, position: 'sidebar', date: { pickerAppearance: 'dayAndTime' } } },
       {
         type: 'collapsible',
         label: 'Voided',
@@ -673,6 +723,158 @@ export function unitsCollection(o: ResolvedSupplies): CollectionConfig {
         ],
       },
       { name: 'notes', type: 'textarea', label: 'Notes' },
+    ],
+  }
+}
+
+/** Builds waiting for an order: made by assignUnits when not enough are ready, filled by later builds. */
+export function requestsCollection(o: ResolvedSupplies): CollectionConfig {
+  const beforeChange: CollectionBeforeChangeHook = async ({ data, originalDoc, operation, req }) => {
+    if (req.context?.[INTERNAL]) return data
+    if (operation === 'create') throw new KittingError('useAssign', 'Build requests are made when an order can’t be filled from ready stock.')
+    // By hand: cancel an open request, or edit notes. Nothing else.
+    const kept: Doc = { ...originalDoc }
+    if (data.notes !== undefined) kept.notes = data.notes
+    if (data.status === 'cancelled' && originalDoc?.status === 'open') kept.status = 'cancelled'
+    return kept
+  }
+  const beforeDelete: CollectionBeforeDeleteHook = ({ req }) => {
+    if (!req.context?.[ALLOW_DELETE]) throw new KittingError('appendOnly', 'Build requests can’t be deleted. Cancel one instead.')
+  }
+  return {
+    slug: o.requests,
+    labels: { singular: 'Build request', plural: 'Build requests' },
+    admin: {
+      group: o.adminGroup,
+      useAsTitle: 'reference',
+      defaultColumns: ['reference', 'recipe', 'count', 'filled', 'status', 'createdAt'],
+      description: 'Orders waiting for units to be built, oldest first. Building that recipe fills them in order.',
+    },
+    defaultSort: 'createdAt',
+    access: { read: o.read, create: o.manage, update: o.manage, delete: o.manage },
+    hooks: { beforeChange: [beforeChange], beforeDelete: [beforeDelete] },
+    fields: [
+      { name: 'reference', type: 'text', required: true, label: 'For', admin: { readOnly: true } },
+      { name: 'recipe', type: 'relationship', relationTo: o.recipes as CollectionSlug, required: true, label: 'Recipe', admin: { readOnly: true } },
+      {
+        type: 'row',
+        fields: [
+          { name: 'count', type: 'number', required: true, min: 1, label: 'Needed', admin: { readOnly: true, width: '50%' } },
+          { name: 'filled', type: 'number', defaultValue: 0, label: 'Filled so far', admin: { readOnly: true, width: '50%' } },
+        ],
+      },
+      {
+        name: 'status',
+        type: 'select',
+        required: true,
+        defaultValue: 'open',
+        label: 'Status',
+        options: [
+          { label: 'Waiting to be built', value: 'open' },
+          { label: 'Filled', value: 'filled' },
+          { label: 'Cancelled', value: 'cancelled' },
+        ],
+        admin: { position: 'sidebar', description: 'You can cancel a waiting request.' },
+      },
+      { name: 'units', type: 'relationship', relationTo: o.units as CollectionSlug, hasMany: true, label: 'Units given to it', admin: { readOnly: true } },
+      { name: 'notes', type: 'textarea', label: 'Notes' },
+    ],
+  }
+}
+
+const dimensionsRow = (prefix: string) => ({
+  type: 'row' as const,
+  fields: [
+    { name: `${prefix}Length`, type: 'number' as const, min: 0, label: 'Length', admin: { width: '25%' } },
+    { name: `${prefix}Width`, type: 'number' as const, min: 0, label: 'Width', admin: { width: '25%' } },
+    { name: `${prefix}Height`, type: 'number' as const, min: 0, label: 'Height', admin: { width: '25%' } },
+    {
+      name: `${prefix}Unit`,
+      type: 'select' as const,
+      defaultValue: 'cm',
+      label: 'In',
+      options: [
+        { label: 'cm', value: 'cm' },
+        { label: 'inches', value: 'in' },
+      ],
+      admin: { width: '25%' },
+    },
+  ],
+})
+
+/** Boxes you ship in, with how many of each recipe fit: the basis for box suggestions. */
+export function boxesCollection(o: ResolvedSupplies): CollectionConfig {
+  const beforeChange: CollectionBeforeChangeHook = async ({ data, originalDoc, req }) => {
+    const scope = o.scopeField ? (data[o.scopeField] ?? originalDoc?.[o.scopeField]) : undefined
+    for (const fit of (data.fits ?? []) as Doc[]) await sameScope(req, o, scope, o.recipes, fit.recipe, 'A recipe in this box')
+    return data
+  }
+  return {
+    slug: o.boxes,
+    labels: { singular: 'Box', plural: 'Boxes' },
+    admin: {
+      group: o.adminGroup,
+      useAsTitle: 'name',
+      defaultColumns: ['name', 'cost', 'active'],
+      description: 'Boxes you ship in. Box suggestions use what fits, the weights and the cost, plus postage.',
+    },
+    access: { read: o.read, create: o.manage, update: o.manage, delete: o.manage },
+    hooks: { beforeChange: [beforeChange] },
+    fields: [
+      { name: 'name', type: 'text', required: true, label: 'Name', admin: { description: 'For example: Small mailer.' } },
+      { name: 'active', type: 'checkbox', defaultValue: true, label: 'In use', admin: { position: 'sidebar' } },
+      { type: 'collapsible', label: 'Outside size', fields: [dimensionsRow('outside')] },
+      {
+        type: 'row',
+        fields: [
+          { name: 'cost', type: 'number', min: 0, defaultValue: 0, label: 'Cost of one box', admin: { width: '33%' } },
+          { name: 'emptyWeight', type: 'number', min: 0, defaultValue: 0, label: 'Empty weight (g)', admin: { width: '33%' } },
+          { name: 'maxWeight', type: 'number', min: 0, label: 'Most it can weigh (g)', admin: { width: '33%', description: 'Empty: no limit.' } },
+        ],
+      },
+      {
+        name: 'fits',
+        type: 'array',
+        label: 'What fits',
+        labels: { singular: 'Recipe', plural: 'Recipes' },
+        admin: { description: 'How many of each thing fit in this box. Only these are suggested.' },
+        fields: [
+          {
+            type: 'row',
+            fields: [
+              { name: 'recipe', type: 'relationship', relationTo: o.recipes as CollectionSlug, required: true, label: 'Recipe', admin: { width: '60%' } },
+              { name: 'units', type: 'number', required: true, min: 1, label: 'How many fit', admin: { width: '40%' } },
+            ],
+          },
+        ],
+      },
+      { name: 'notes', type: 'textarea', label: 'Notes' },
+    ],
+  }
+}
+
+/** Your own postage by weight, used when no shipping plugin gives real rates. */
+export function postageCollection(o: ResolvedSupplies): CollectionConfig {
+  return {
+    slug: o.postage,
+    labels: { singular: 'Postage rate', plural: 'Postage rates' },
+    admin: {
+      group: o.adminGroup,
+      useAsTitle: 'name',
+      defaultColumns: ['name', 'upToGrams', 'cost'],
+      description: 'What one parcel costs to send, by weight. The cheapest band a parcel fits is used. A shipping plugin’s real rates replace these when it has them.',
+    },
+    defaultSort: 'upToGrams',
+    access: { read: o.read, create: o.manage, update: o.manage, delete: o.manage },
+    fields: [
+      { name: 'name', type: 'text', required: true, label: 'Name', admin: { description: 'For example: Ground, up to 500 g.' } },
+      {
+        type: 'row',
+        fields: [
+          { name: 'upToGrams', type: 'number', required: true, min: 1, label: 'Up to (g)', admin: { width: '50%' } },
+          { name: 'cost', type: 'number', required: true, min: 0, label: 'Cost', admin: { width: '50%' } },
+        ],
+      },
     ],
   }
 }

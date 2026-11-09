@@ -1,6 +1,6 @@
 import type { Access, CollectionConfig, Config, Plugin } from 'payload'
 
-import { itemsCollection, lotsCollection, unitsCollection, movementsCollection, recipesCollection, suppliersCollection } from './collections.js'
+import { boxesCollection, itemsCollection, lotsCollection, postageCollection, requestsCollection, unitsCollection, movementsCollection, recipesCollection, suppliersCollection } from './collections.js'
 import { kittingEndpoints } from './endpoints.js'
 import type { ResolvedSupplies, KittingPluginOptions } from './types.js'
 
@@ -22,6 +22,9 @@ export const kittingPlugin =
       recipes: options.slugs?.recipes ?? 'supply-recipes',
       lots: options.slugs?.lots ?? 'supply-lots',
       units: options.slugs?.units ?? 'assembled-units',
+      requests: options.slugs?.requests ?? 'build-requests',
+      boxes: options.slugs?.boxes ?? 'box-types',
+      postage: options.slugs?.postage ?? 'postage-rates',
       onBuild: options.units?.onBuild,
       userSlug,
       read: options.access?.read ?? options.access?.manage ?? signedIn,
@@ -47,6 +50,9 @@ export const kittingPlugin =
       apply(recipesCollection(o), ov.recipes),
       apply(lotsCollection(o), ov.lots),
       apply(unitsCollection(o), ov.units),
+      apply(requestsCollection(o), ov.requests),
+      apply(boxesCollection(o), ov.boxes),
+      apply(postageCollection(o), ov.postage),
     ]
     const components = config.admin?.components ?? {}
     return {

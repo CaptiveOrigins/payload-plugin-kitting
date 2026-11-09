@@ -3,7 +3,7 @@ import { MongoMemoryReplSet } from 'mongodb-memory-server'
 import { buildConfig, getPayload, type Access, type CollectionConfig, type Field, type Payload } from 'payload'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
-import { applyRecipe, buildUnits, recommendReadyStock, kittingPlugin, KittingError, voidUnit, sendPendingAlerts, stockReport, suggestShrinkagePercent, writeOffExpired } from '../src/index.js'
+import { applyRecipe, assignUnits, buildUnits, recommendReadyStock, release, shipUnits, swapUnit, kittingPlugin, KittingError, voidUnit, sendPendingAlerts, stockReport, suggestShrinkagePercent, writeOffExpired } from '../src/index.js'
 
 // Made-up data throughout: example.com addresses, invented supplies and sites.
 type Doc = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -62,7 +62,7 @@ beforeAll(async () => {
             canSend: () => emailOn,
             sendEmail: async ({ to, subject, text }) => void mail.push({ to, subject, text }),
           },
-          overrides: { items: withTenant, suppliers: withTenant, movements: withTenant, recipes: withTenant, lots: withTenant, units: withTenant },
+          overrides: { items: withTenant, suppliers: withTenant, movements: withTenant, recipes: withTenant, lots: withTenant, units: withTenant, requests: withTenant, boxes: withTenant, postage: withTenant },
           units: {
             onBuild: ({ unit }) => {
               if (unit.externalId === refuseBuild) throw new Error('the host said no')
@@ -646,5 +646,96 @@ describe('test audit 2026-11-08: gaps closed', () => {
     expect((await get('supply-items', milk.id)).onHand).toBe(0)
     const bad = await create('supply-recipes', { tenant: siteA.id, name: 'Bad unit', key: `bu-${run().toLowerCase()}`, lines: [{ item: milk.id, quantity: 1, unit: 'kg' }] })
     await expect(applyRecipe(payload, { id: bad.id }, 1, { scope: siteA.id })).rejects.toThrow(/can’t be converted/)
+  })
+})
+
+describe('fulfilment: assign, queue, swap, release', () => {
+  const run = () => Math.random().toString(36).slice(2, 7).toUpperCase()
+  async function stocked(ready: number) {
+    const swab = await create('supply-items', { tenant: siteA.id, name: 'Order swab', unit: 'each', openingStock: 100 })
+    const recipe = await create('supply-recipes', { tenant: siteA.id, name: 'Order kit', key: `ok-${run().toLowerCase()}`, lines: [{ item: swab.id, quantity: 1 }] })
+    const ids = Array.from({ length: ready }, (_, i) => `O${i}-${run()}`)
+    if (ready) await buildUnits(payload, { id: recipe.id }, ids, { scope: siteA.id })
+    return { recipe, ids }
+  }
+  const unitsOf = async (recipe: Doc): Promise<Record<string, Doc>> =>
+    Object.fromEntries(((await payload.find({ collection: 'assembled-units' as never, where: { recipe: { equals: recipe.id } }, pagination: false, depth: 0 })).docs as Doc[]).map((u) => [u.externalId, u]))
+  const requestOf = async (reference: string) => ((await payload.find({ collection: 'build-requests' as never, where: { reference: { equals: reference } }, depth: 0 })).docs as Doc[])[0]
+
+  it('assigns ready units oldest first and queues the rest; running it again adds only the difference', async () => {
+    const { recipe, ids } = await stocked(2)
+    const order = `Order ${run()}`
+    const a = await assignUnits(payload, { id: recipe.id }, 3, { reference: order, scope: siteA.id })
+    expect(a.assigned.map((u) => u.externalId)).toEqual(ids)
+    expect([a.short, a.request?.count]).toEqual([1, 1])
+    const again = await assignUnits(payload, { id: recipe.id }, 3, { reference: order, scope: siteA.id })
+    expect([again.assigned.length, again.short, again.request?.count]).toEqual([2, 0, 1])
+    const more = await assignUnits(payload, { id: recipe.id }, 4, { reference: order, scope: siteA.id })
+    expect([more.short, more.request?.count]).toEqual([1, 2])
+    expect((await payload.count({ collection: 'build-requests' as never, where: { reference: { equals: order } } })).totalDocs).toBe(1)
+    // Building fills the waiting request first.
+    const built = await buildUnits(payload, { id: recipe.id }, [`N1-${run()}`, `N2-${run()}`, `N3-${run()}`], { scope: siteA.id })
+    expect(built.filled.map((f) => f.reference)).toEqual([order, order])
+    expect(await requestOf(order)).toMatchObject({ status: 'filled', filled: 2 })
+    const units = await unitsOf(recipe)
+    expect(Object.values(units).filter((u) => u.assignedTo === order)).toHaveLength(4)
+    expect(Object.values(units).filter((u) => u.status === 'ready')).toHaveLength(1)
+    await expect(assignUnits(payload, { id: recipe.id }, 1, { reference: ' ', scope: siteA.id })).rejects.toThrow(/which order/)
+  })
+
+  it('lets the scan at packing decide, swapping for a reserved unit or filling a queued one', async () => {
+    const { recipe, ids } = await stocked(3)
+    const order = `Order ${run()}`
+    await assignUnits(payload, { id: recipe.id }, 1, { reference: order, scope: siteA.id }) // takes ids[0]
+    // Scanning the reserved unit changes nothing.
+    expect((await swapUnit(payload, { reference: order, take: { externalId: ids[0]! }, scope: siteA.id })).released).toBeNull()
+    // Scanning another ready unit: it takes the reserved one's place, which is ready again.
+    const s = await swapUnit(payload, { reference: order, take: { externalId: ids[2]! }, scope: siteA.id })
+    expect([s.taken.externalId, s.released?.externalId]).toEqual([ids[2], ids[0]])
+    let units = await unitsOf(recipe)
+    expect([units[ids[0]!]!.status, units[ids[2]!]!.assignedTo]).toEqual(['ready', order])
+    // A unit kept for another order can't be taken.
+    const other = `Order ${run()}`
+    await assignUnits(payload, { id: recipe.id }, 1, { reference: other, scope: siteA.id })
+    const otherUnit = Object.values(await unitsOf(recipe)).find((u) => u.assignedTo === other)!
+    await expect(swapUnit(payload, { reference: order, take: { id: otherUnit.id } })).rejects.toThrow(/kept for/)
+    // An order with only a queued request: the scan fills it.
+    const queued = `Order ${run()}`
+    await assignUnits(payload, { id: recipe.id }, 2, { reference: queued, scope: siteA.id, req: undefined }) // 1 ready left, 1 queued
+    await buildUnits(payload, { id: recipe.id }, [`Q-${run()}`], { scope: siteA.id, fillRequests: false })
+    const loose = Object.values(await unitsOf(recipe)).find((u) => u.status === 'ready')!
+    const f = await swapUnit(payload, { reference: queued, take: { id: loose.id } })
+    expect(f.fromRequest).not.toBeNull()
+    expect(await requestOf(queued)).toMatchObject({ status: 'filled', filled: 1 })
+    // An order holding nothing of it is refused.
+    await expect(swapUnit(payload, { reference: `Nobody ${run()}`, take: { externalId: ids[1]! }, scope: siteA.id })).rejects.toThrow()
+    units = await unitsOf(recipe)
+    expect(Object.values(units).filter((u) => u.assignedTo === order)).toHaveLength(1)
+  })
+
+  it('releases one unit or everything an order holds, never shipped ones, and cancels its queue', async () => {
+    const { recipe, ids } = await stocked(3)
+    const order = `Order ${run()}`
+    await assignUnits(payload, { id: recipe.id }, 5, { reference: order, scope: siteA.id }) // 3 assigned, 2 queued
+    await shipUnits(payload, [(await unitsOf(recipe))[ids[0]!]!.id])
+    const one = await release(payload, { reference: order, unit: { externalId: ids[1]! }, scope: siteA.id })
+    expect(one.released.map((u) => [u.externalId, u.status])).toEqual([[ids[1], 'ready']])
+    await expect(release(payload, { reference: order, unit: { externalId: ids[0]! }, scope: siteA.id })).rejects.toThrow(/isn’t kept/)
+    const all = await release(payload, { reference: order, scope: siteA.id })
+    expect(all.released.map((u) => u.externalId)).toEqual([ids[2]])
+    expect(all.cancelledRequests).toHaveLength(1)
+    const units = await unitsOf(recipe)
+    expect([units[ids[0]!]!.status, units[ids[1]!]!.status, units[ids[2]!]!.status]).toEqual(['shipped', 'ready', 'ready'])
+    expect((await requestOf(order))!.status).toBe('cancelled')
+    await expect(shipUnits(payload, [units[ids[1]!]!.id])).rejects.toThrow(/can’t be shipped/)
+    // Build requests can't be made by hand, and only cancelled.
+    await expect(create('build-requests', { tenant: siteA.id, reference: 'x', recipe: recipe.id, count: 1 }, as(staffA))).rejects.toThrow(/can’t be filled from ready stock/)
+  })
+
+  it('keeps one site’s orders away from another’s units', async () => {
+    const { recipe, ids } = await stocked(1)
+    await expect(swapUnit(payload, { reference: 'B order', take: { externalId: ids[0]! }, scope: siteB.id })).rejects.toThrow(/hasn’t been built/)
+    await expect(assignUnits(payload, { id: recipe.id }, 1, { reference: 'B order', scope: siteB.id })).rejects.toThrow(/somewhere else/)
+    await expect(release(payload, { reference: 'B order' })).rejects.toThrow(/Say which tenant/)
   })
 })
