@@ -26,6 +26,8 @@ export const kittingPlugin =
       boxes: options.slugs?.boxes ?? 'box-types',
       postage: options.slugs?.postage ?? 'postage-rates',
       onBuild: options.units?.onBuild,
+      shippingProvider: options.shipping?.provider,
+      currency: options.shipping?.currency ?? 'USD',
       userSlug,
       read: options.access?.read ?? options.access?.manage ?? signedIn,
       manage: options.access?.manage ?? signedIn,

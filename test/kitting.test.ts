@@ -1,9 +1,10 @@
 import { mongooseAdapter } from '@payloadcms/db-mongodb'
+import type { ShippingProvider } from '../src/index.js'
 import { MongoMemoryReplSet } from 'mongodb-memory-server'
 import { buildConfig, getPayload, type Access, type CollectionConfig, type Field, type Payload } from 'payload'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
-import { applyRecipe, assignUnits, buildUnits, recommendReadyStock, release, shipUnits, swapUnit, kittingPlugin, KittingError, voidUnit, sendPendingAlerts, stockReport, suggestShrinkagePercent, writeOffExpired } from '../src/index.js'
+import { applyRecipe, assignUnits, recommendBoxes, buildUnits, recommendReadyStock, release, shipUnits, swapUnit, kittingPlugin, KittingError, voidUnit, sendPendingAlerts, stockReport, suggestShrinkagePercent, writeOffExpired } from '../src/index.js'
 
 // Made-up data throughout: example.com addresses, invented supplies and sites.
 type Doc = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -778,5 +779,41 @@ describe('ready-stock states and their emails', () => {
     await sendPendingAlerts(payload)
     expect(await get('supply-recipes', recipe.id)).toMatchObject({ stockState: 'build-more', stockAlertStatus: 'not-sent', stockAlertNote: 'Email is off here.' })
     expect(mail.filter((m) => m.subject.includes('Quiet kit'))).toHaveLength(0)
+  })
+})
+
+describe('box suggestions', () => {
+  it('ranks packings by box cost plus postage, and uses carrier rates when there are some', async () => {
+    const swab = await create('supply-items', { tenant: siteA.id, name: 'Box swab', unit: 'each', openingStock: 10 })
+    const recipe = await create('supply-recipes', { tenant: siteA.id, name: 'Box kit', key: `bx-${Math.random().toString(36).slice(2, 8)}`, unitWeight: 100, lines: [{ item: swab.id, quantity: 1 }] })
+    const dims = { outsideLength: 30, outsideWidth: 20, outsideHeight: 10, outsideUnit: 'cm' }
+    await create('box-types', { tenant: siteA.id, name: 'Small mailer', cost: 1, emptyWeight: 20, maxWeight: 500, fits: [{ recipe: recipe.id, units: 4 }], ...dims })
+    await create('box-types', { tenant: siteA.id, name: 'Envelope', cost: 0.2, emptyWeight: 5, fits: [{ recipe: recipe.id, units: 1 }], ...dims })
+    // 10 fit, but 800 g max with 100 g empty leaves room for 7.
+    await create('box-types', { tenant: siteA.id, name: 'Big box', cost: 3, emptyWeight: 100, maxWeight: 800, fits: [{ recipe: recipe.id, units: 10 }], ...dims })
+    for (const [upToGrams, cost] of [[150, 4], [500, 7], [1000, 11]]) await create('postage-rates', { tenant: siteA.id, name: `Up to ${upToGrams} g`, upToGrams, cost })
+    // Another site's cheaper box is never offered.
+    await create('box-types', { tenant: siteB.id, name: 'B box', cost: 0, emptyWeight: 0, fits: [] })
+
+    const own = await recommendBoxes(payload, { recipe: { id: recipe.id }, count: 5, provider: null })
+    expect(own.packings.map((p) => [p.total, p.basis])).toEqual([
+      [12.2, 'postage-rates'], // mailer of 4 (420 g, 7) + envelope of 1 (105 g, 4): boxes 1.20 + postage 11
+      [13, 'postage-rates'], // two mailers: 2 + 7 + 4
+      [14, 'postage-rates'], // big box of 5 (600 g): 3 + 11
+    ])
+    expect(own.packings[0]!.summary).toBe('1 × Small mailer (4 each) + 1 × Envelope (1 each): boxes $1.20 + postage $11.00 = $12.20')
+
+    const carrier: ShippingProvider = {
+      name: 'Example Post',
+      quoteRates: async ({ boxes }) => ({ quotedAt: new Date().toISOString(), rates: boxes.map((b) => ({ boxId: b.id, carrier: 'Example Post', service: 'Ground', amount: b.weight.value > 500 ? 2 : 5, currency: 'USD' })) }),
+    }
+    const real = await recommendBoxes(payload, { recipe: { id: recipe.id }, count: 5, provider: carrier })
+    expect([real.packings[0]!.total, real.packings[0]!.basis]).toEqual([5, 'carrier']) // big box 3 + 2
+    expect(real.packings[0]!.summary).toMatch(/\(Example Post rates\)$/)
+
+    const broken: ShippingProvider = { name: 'Down Post', quoteRates: async () => Promise.reject(new Error('timeout')) }
+    const fallback = await recommendBoxes(payload, { recipe: { id: recipe.id }, count: 5, provider: broken })
+    expect(fallback.packings[0]!.total).toBe(12.2)
+    expect(fallback.notes).toContain('Rates unavailable from Down Post; ranked by box cost and your postage rates.')
   })
 })

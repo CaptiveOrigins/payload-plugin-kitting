@@ -25,7 +25,7 @@ You switch on only what you need, and the simple case stays simple:
 
 1. **Supply tracker.** Items in any unit, suppliers, lots and use-by dates, a stock log, the shrinkage allowance and low-stock email. Nothing else. *Built.*
 2. **Recipes and builder.** Recipes, including recipes that use other recipes, and a builder in the admin where you scan or type each unit's external ID: its supplies come off stock and it records the lots that went into it. *Built.*
-3. **Fulfilment.** *Built:* ready units assigned to orders with a "build one" queue that later builds fill, a scan-time swap and release for packing, how many ready units to keep by one of five methods (below), and the typed contracts for a shop and a shipping plugin. *Planned:* the rest of (natively with Payload's ecommerce plugin, or through Kitting's own API), a "build one" queue, a recommended ready-stock level learned from your sales, and box suggestions by cost, using real postage when a shipping plugin is installed.
+3. **Fulfilment.** *Built:* ready units assigned to orders with a "build one" queue that later builds fill, a scan-time swap and release for packing, how many ready units to keep by one of five methods (below), and the typed contracts for a shop and a shipping plugin. *Built too:* box suggestions by cost. *Planned:* the rest of (natively with Payload's ecommerce plugin, or through Kitting's own API), a "build one" queue, a recommended ready-stock level learned from your sales, and box suggestions by cost, using real postage when a shipping plugin is installed.
 
 Today levels 1 and 2 are always on together; the switches come with the builder.
 
@@ -39,7 +39,7 @@ Today levels 1 and 2 are always on together; the switches come with the builder.
 
 Later, not yet: ordering from suppliers when something stays low for a few days (see [docs/roadmap.md](docs/roadmap.md)), and turning till sales into usage.
 
-**Testing so far:** 55 tests pass (audited 2026-11-08, see [docs/test-audit.md](docs/test-audit.md)): 18 pure ones (units, lots, the shrinkage allowance, every stock method against known values, and the commerce and shipping contracts with made-up doubles), and 37 against a real MongoDB (in memory, single-node replica set) on Payload 3.92: movements, units and packs, the shrinkage allowance and its suggestion, lots used first to expire first with expired ones written off, nested recipes, the builder (lots per unit, refusals, voiding, the HTTP endpoint's access), the ready-stock recommendation, assigning, queueing, swapping and releasing units for orders, every ready-stock state and its one email, recipes, the refusal to go below zero, the low-stock email firing once, two senders racing for one alert, site isolation and access. The overview at `/admin/supplies` was checked in a local dev server of a real host app with made-up data: it renders, its headings and tables are in order, and its text and buttons measured 15:1 contrast or better in dark mode. The builder page and the new overview sections haven't been opened in a browser yet, and nothing has been tried by a person, with a keyboard or a screen reader.
+**Testing so far:** 57 tests pass (audited 2026-11-08, see [docs/test-audit.md](docs/test-audit.md)): 19 pure ones (units, lots, the shrinkage allowance, every stock method against known values, packing, and the commerce and shipping contracts with made-up doubles), and 38 against a real MongoDB (in memory, single-node replica set) on Payload 3.92: movements, units and packs, the shrinkage allowance and its suggestion, lots used first to expire first with expired ones written off, nested recipes, the builder (lots per unit, refusals, voiding, the HTTP endpoint's access), the ready-stock recommendation, assigning, queueing, swapping and releasing units for orders, every ready-stock state and its one email, box suggestions with and without a carrier, recipes, the refusal to go below zero, the low-stock email firing once, two senders racing for one alert, site isolation and access. The overview at `/admin/supplies` was checked in a local dev server of a real host app with made-up data: it renders, its headings and tables are in order, and its text and buttons measured 15:1 contrast or better in dark mode. The builder page and the new overview sections haven't been opened in a browser yet, and nothing has been tried by a person, with a keyboard or a screen reader.
 
 ## What it does
 
@@ -112,6 +112,17 @@ await release(payload, { reference: 'Order 1042', scope: siteId, req })
 
 Build requests (`build-requests`) list what's waiting, oldest first. A build gives its new units to them first, in order; pass `fillRequests: false` to `buildUnits` to keep a batch ready instead. Requests can't be made by hand, only cancelled.
 
+## Box suggestions
+
+Add your boxes (`box-types`): their outside size, cost, empty weight, the most they can weigh, and how many of each recipe fit. Give the recipe a packed weight, and add your postage by weight (`postage-rates`). Then:
+
+```ts
+const { packings, notes } = await recommendBoxes(payload, { recipe: { key: 'sample-kit' }, count: 5, scope: siteId, to })
+// packings[0].summary: "1 × Small mailer (4 each) + 1 × Envelope (1 each): boxes $1.20 + postage $11.00 = $12.20"
+```
+
+It tries every way to pack them into one box type, or one type plus one box for the rest, within each box's weight limit. Then it ranks them by box cost plus postage, then fewest boxes, then least empty space. With a shipping plugin (`shipping: { provider }`, or one that registers itself at `config.custom.shipping.provider`), it asks for real rates for the best few and uses them. If the carrier is down or has no rate for a box, it uses your postage rates and says so in `notes`. Without a packed weight it ranks by box cost alone and says so.
+
 ## How many to keep ready
 
 Each recipe has "Ready stock" settings, and `recommendReadyStock(payload, recipeId)` gives every method's answer side by side, the chosen one first, each with its reasoning in plain words: "About 1.4 a day over the last 90 days, a 5-day build and a daily check, 95% service → keep 14 ready (8.4 expected, plus 5.6 safety stock)." It never changes anything by itself: you decide.
@@ -175,6 +186,8 @@ With `scopeField`, a recipe key needs its site: `{ key, scope }`. `{ id }` works
 |---|---|---|
 | `slugs` | `supply-items`, `suppliers`, `supply-movements`, `supply-recipes`, `supply-lots`, `assembled-units` | |
 | `units.onBuild` | none | Runs for each built unit inside the build's transaction |
+| `shipping.provider` | none | A shipping plugin's rates, for box suggestions |
+| `shipping.currency` | `USD` | For showing costs |
 | `access.manage` | signed-in admin users | Add and edit supplies, suppliers and recipes, and record movements. May return a query |
 | `access.read` | same as `manage` | See them |
 | `scopeField` | none | The field that separates sites, such as `tenant`. Your tenant plugin adds it |

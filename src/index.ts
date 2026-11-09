@@ -1,4 +1,6 @@
 export { kittingPlugin } from './plugin.js'
+export { byCost, packings, postageFor, recommendBoxes, type BoxOption, type Packing } from './boxes.js'
+export { readyStatus, refreshStockStates, sendStockAlerts, stateFor, type ReadyStatus, type StockState } from './readystock.js'
 export { assignUnits, fillRequests, release, shipUnits, swapUnit } from './fulfil.js'
 export { buildUnits, cleanExternalIds, recommendReadyStock, splitLots, voidUnit, type VoidReason } from './build.js'
 export {

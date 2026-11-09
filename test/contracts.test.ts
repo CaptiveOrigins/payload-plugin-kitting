@@ -61,3 +61,15 @@ describe('commerce contract', () => {
     expect(grouped.map((g) => [g.recipe, g.quantity, g.lines.length])).toEqual([['sample-kit', 7, 2]])
   })
 })
+
+describe('packing (pure)', () => {
+  const box = (id: string, capacity: number, cost = 1) => ({ id, name: id, capacity, cost, emptyWeight: 0, dimensions: null })
+  it('packs into one box type, or one type plus one box for the rest', async () => {
+    const { packings, postageFor } = await import('../src/boxes.js')
+    const shapes = packings(9, [box('A', 4), box('B', 1)]).map((p) => p.map((x) => `${String(x.box.id)}${x.units}`).join(' '))
+    expect(shapes.sort()).toEqual(['A4 A4 A1', 'A4 A4 B1', 'B1 B1 B1 B1 B1 B1 B1 B1 B1'].sort())
+    expect(postageFor(120, [{ upToGrams: 150, cost: 4 }, { upToGrams: 500, cost: 7 }])).toBe(4)
+    expect(postageFor(600, [{ upToGrams: 150, cost: 4 }, { upToGrams: 500, cost: 7 }])).toBeNull()
+    expect(postageFor(null, [{ upToGrams: 150, cost: 4 }])).toBeNull()
+  })
+})

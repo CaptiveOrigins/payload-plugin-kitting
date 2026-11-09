@@ -1,5 +1,7 @@
 import type { Access, CollectionConfig, Payload, PayloadRequest } from 'payload'
 
+import type { ShippingProvider } from './contracts/shipping.js'
+
 export type ID = string | number
 
 /**
@@ -43,6 +45,12 @@ export type KittingPluginOptions = {
    * `assembled-units`, `build-requests`, `box-types`, `postage-rates`.
    */
   slugs?: { items?: string; suppliers?: string; movements?: string; recipes?: string; lots?: string; units?: string; requests?: string; boxes?: string; postage?: string }
+  /**
+   * Box suggestions (level 3) use a shipping plugin's real rates when there is one: pass `provider`, or
+   * let the shipping plugin register itself at `config.custom.shipping.provider`. Without one, your
+   * postage rates. `currency` is for display (default USD).
+   */
+  shipping?: { provider?: ShippingProvider; currency?: string }
   /**
    * Built units (level 2): things you build from a recipe and label with an external ID, such as a
    * kit with the ID printed on its tube. `onBuild` runs for each unit inside the build's transaction,
@@ -118,6 +126,8 @@ export type ResolvedSupplies = {
   boxes: string
   postage: string
   onBuild?: NonNullable<KittingPluginOptions['units']>['onBuild']
+  shippingProvider?: ShippingProvider
+  currency: string
   userSlug: string
   read: Access
   manage: Access
