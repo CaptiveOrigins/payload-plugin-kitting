@@ -4,7 +4,7 @@ Kitting for [Payload](https://payloadcms.com): anyone from a café to a genomics
 
 It's meant for people with no IT department. You set it up once and carefully, with every item and a recipe for everything you make, down to the gram or the microlitre. From then on it knows how much of everything you need.
 
-**Status: 0.1.0, not on npm yet. All three levels are built.** Anything not built yet says so.
+**Status: 0.1.0 is on npm; 0.2.0 is ready on `main` and not released yet (see [CHANGELOG.md](CHANGELOG.md)). All three levels are built.** Anything not built yet says so.
 
 ## Two examples
 
