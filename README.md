@@ -31,7 +31,7 @@ Today levels 1 and 2 are always on together; the switches come with the builder.
 
 ## Built into every level
 
-- **Shrinkage allowance.** Shrinkage is the usual business word for stock lost to damage, spoilage, defects or errors. Each item, recipe and recipe line can carry a shrinkage allowance in %, added to what a recipe uses and recorded on each movement ("18 g of beans per drink + 5% shrinkage allowance"). The most specific wins: line, then recipe, then item, then the site default. `shrinkage: { enabled: false }` turns them all off, and 0 turns one off. `suggestShrinkagePercent` suggests an item's % from what happened over the last 90 days: the allowance taken, plus what was written off, minus what counts found extra, as a share of what recipes used. It needs 10 recipe uses first, and says so until then.
+- **Shrinkage allowance.** Shrinkage is the usual business word for stock lost to damage, spoilage, defects or errors. Each item, recipe and recipe line can carry a shrinkage allowance in %, added to what a recipe uses and recorded on each movement ("18 g of beans per drink + 5% shrinkage allowance"). The most specific wins: line, then recipe, then item, then the site default. Each site switches it on or off and sets its default in **Kitting settings** in the admin (`kitting-settings`, one per site); the plugin's `shrinkage: { enabled, defaultPercent }` are only the starting values. 0 turns it off for one item. Each supply's page shows the shrinkage **learned** from the last 90 days, with the reasoning ("recipes used 12 of Buffer tube. The shrinkage allowance took 0.24, 1 was written off… about 10.3% lost"), and a "Use 10.3%" button for people who may change it; nothing changes until someone presses it. It's the allowance taken, plus what was written off, minus what counts found extra, as a share of what recipes used, and it needs 10 recipe uses first (`suggestShrinkagePercent`).
 - **Units.** Each item is counted in one unit (g, ml, µl, each…). Enter stock in any unit of the same kind (kg for g, l for µl) or in one of the item's packs ("1 kg bag" = 1000 g), and it's converted once on the way in. Recipe lines can use other units too.
 - **Lots and use-by dates** (per item, "Track lots"). Each delivery becomes a lot with its own number and use-by date, or one worked out from the item's shelf life. Stock is used first to expire first, and expired lots are never used. Every movement records its lot. Expired lots are written off as shrinkage (`writeOffExpired`, and automatically when the overview opens). The overview lists what to use soon.
 
@@ -41,7 +41,7 @@ Today levels 1 and 2 are always on together; the switches come with the builder.
 
 Later, not yet: ordering from suppliers when something stays low for a few days (see [docs/roadmap.md](docs/roadmap.md)), and turning till sales into usage.
 
-**Testing so far:** 65 tests pass (audited 2026-11-08, see [docs/test-audit.md](docs/test-audit.md)): 20 pure ones (units, lots, the shrinkage allowance, every stock method against known values, packing, and the commerce and shipping contracts with made-up doubles), and 45 against a real MongoDB (in memory, single-node replica set) on Payload 3.92: movements, units and packs, the shrinkage allowance and its suggestion, lots used first to expire first with expired ones written off, nested recipes, the builder (lots per unit, refusals, voiding, the HTTP endpoint's access), the ready-stock recommendation, assigning, queueing, swapping and releasing units for orders, every ready-stock state and its one email, box suggestions with and without a carrier, orders through Payload's real ecommerce plugin, accepting a number to keep, recipes, the refusal to go below zero, the low-stock email firing once, two senders racing for one alert, site isolation and access. The overview at `/admin/supplies` was checked in a local dev server of a real host app with made-up data: it renders, its headings and tables are in order, and its text and buttons measured 15:1 contrast or better in dark mode. On 2026-11-08 the overview (ready stock included), the builder and a built unit's page were opened in a local dev server of the same host app with made-up data. A batch was scanned and built from the keyboard alone, a repeated ID was refused, a used one gave a clear message, and the unit's page showed its lots, with no server errors. On 2026-11-09 the getting-started page, the stock count (keyboard only, with an invalid box refusing to save) and the Today summary were checked the same way. I haven’t tried a screen reader; that’s part of the owner’s hands-on test (T14 in the ops tests list).
+**Testing so far:** 66 tests pass (audited 2026-11-08, see [docs/test-audit.md](docs/test-audit.md)): 20 pure ones (units, lots, the shrinkage allowance, every stock method against known values, packing, and the commerce and shipping contracts with made-up doubles), and 45 against a real MongoDB (in memory, single-node replica set) on Payload 3.92: movements, units and packs, the shrinkage allowance and its suggestion, lots used first to expire first with expired ones written off, nested recipes, the builder (lots per unit, refusals, voiding, the HTTP endpoint's access), the ready-stock recommendation, assigning, queueing, swapping and releasing units for orders, every ready-stock state and its one email, box suggestions with and without a carrier, orders through Payload's real ecommerce plugin, accepting a number to keep, recipes, the refusal to go below zero, the low-stock email firing once, two senders racing for one alert, site isolation and access. The overview at `/admin/supplies` was checked in a local dev server of a real host app with made-up data: it renders, its headings and tables are in order, and its text and buttons measured 15:1 contrast or better in dark mode. On 2026-11-08 the overview (ready stock included), the builder and a built unit's page were opened in a local dev server of the same host app with made-up data. A batch was scanned and built from the keyboard alone, a repeated ID was refused, a used one gave a clear message, and the unit's page showed its lots, with no server errors. On 2026-11-09 the getting-started page, the stock count (keyboard only, with an invalid box refusing to save) and the Today summary were checked the same way. I haven’t tried a screen reader; that’s part of the owner’s hands-on test (T14 in the ops tests list).
 
 ## What it does
 
@@ -200,7 +200,7 @@ With `scopeField`, a recipe key needs its site: `{ key, scope }`. `{ id }` works
 
 | Option | Default | |
 |---|---|---|
-| `slugs` | `supply-items`, `suppliers`, `supply-movements`, `supply-recipes`, `supply-lots`, `assembled-units` | |
+| `slugs` | `supply-items`, `suppliers`, `supply-movements`, `supply-recipes`, `supply-lots`, `assembled-units`, `build-requests`, `box-types`, `postage-rates`, `kitting-settings` | |
 | `units.onBuild` | none | Runs for each built unit inside the build's transaction |
 | `shipping.provider` | none | A shipping plugin's rates, for box suggestions |
 | `shipping.currency` | `USD` | For showing costs |
@@ -210,7 +210,7 @@ With `scopeField`, a recipe key needs its site: `{ key, scope }`. `{ id }` works
 | `access.read` | same as `manage` | See them |
 | `scopeField` | none | The field that separates sites, such as `tenant`. Your tenant plugin adds it |
 | `negativeStock` | `'refuse'` | Or `'warn'`. `applyRecipe` can override it per call |
-| `shrinkage.enabled` | `true` | `false` turns every shrinkage allowance off |
+| `shrinkage.enabled` | `true` | The starting value; each site can switch it in Kitting settings |
 | `shrinkage.defaultPercent` | `0` | For items without their own |
 | `lots.warningDays` | `14` | How soon before its use-by date a lot shows under "Use soon". Items can set their own |
 | `lots.autoWriteOff` | `true` | Write off expired lots when the overview opens |
@@ -231,7 +231,7 @@ Movements can't be edited or deleted whatever `access` says. A trusted cleanup s
 - Quantities can be fractional and are rounded to six decimal places.
 - A lot's use-by date is a day; the whole day is usable, and it's compared in UTC.
 - With an allowance on, everyday losses are covered by it: write off only the unusual (a dropped bag, a failed batch), or it's counted twice until the next count corrects it.
-- Shrinkage allowances are set in config and on each item and recipe. A site-wide setting in the admin is planned.
+- Kitting settings are one per site. Creating them for a site is checked against `access.manage`; keeping each site's records to its own site is your tenant plugin's job, as for supplies.
 
 ## Development
 

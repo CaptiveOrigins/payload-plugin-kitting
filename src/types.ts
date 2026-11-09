@@ -44,7 +44,7 @@ export type KittingPluginOptions = {
    * Collection slugs. Defaults: `supply-items`, `suppliers`, `supply-movements`, `supply-recipes`, `supply-lots`,
    * `assembled-units`, `build-requests`, `box-types`, `postage-rates`.
    */
-  slugs?: { items?: string; suppliers?: string; movements?: string; recipes?: string; lots?: string; units?: string; requests?: string; boxes?: string; postage?: string }
+  slugs?: { items?: string; suppliers?: string; movements?: string; recipes?: string; lots?: string; units?: string; requests?: string; boxes?: string; postage?: string; settings?: string }
   /**
    * Box suggestions (level 3) use a shipping plugin's real rates when there is one: pass `provider`, or
    * let the shipping plugin register itself at `config.custom.shipping.provider`. Without one, your
@@ -103,6 +103,7 @@ export type KittingPluginOptions = {
    * set their own; the most specific wins (line, then recipe, then item, then this default).
    */
   shrinkage?: { enabled?: boolean; defaultPercent?: number }
+  // Each site can change both in the admin (Kitting settings); these are the starting values.
   /**
    * Lots and use-by dates, for items with "Track lots" ticked. `warningDays` is the default for how
    * soon before a lot's use-by date it shows as expiring. With `autoWriteOff` (default true), expired
@@ -131,6 +132,7 @@ export type KittingPluginOptions = {
     requests?: (c: CollectionConfig) => CollectionConfig
     boxes?: (c: CollectionConfig) => CollectionConfig
     postage?: (c: CollectionConfig) => CollectionConfig
+    settings?: (c: CollectionConfig) => CollectionConfig
   }
   /** Add the Supplies overview at /admin/supplies (below level, reorder list, all stock). Default true. */
   adminView?: boolean
@@ -148,6 +150,7 @@ export type ResolvedSupplies = {
   requests: string
   boxes: string
   postage: string
+  settings: string
   onBuild?: NonNullable<KittingPluginOptions['units']>['onBuild']
   shippingProvider?: ShippingProvider
   boxSource?: BoxSource

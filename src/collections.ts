@@ -178,6 +178,15 @@ export function itemsCollection(o: ResolvedSupplies): CollectionConfig {
           description: 'Stock lost to damage, spoilage, defects or errors, added to what recipes use. Empty: the site’s default. 0: none for this item. A recipe can set its own.',
         },
       },
+      ...(o.adminView
+        ? [
+            {
+              name: 'shrinkageSuggestion',
+              type: 'ui' as const,
+              admin: { components: { Field: '@captiveorigins/payload-plugin-kitting/rsc#ShrinkageSuggestion' }, condition: (_d: unknown, _s: unknown, { operation }: { operation?: string }) => operation !== 'create' },
+            },
+          ]
+        : []),
       {
         type: 'collapsible',
         label: 'Lots and use-by dates',
@@ -884,6 +893,62 @@ export function postageCollection(o: ResolvedSupplies): CollectionConfig {
           { name: 'upToGrams', type: 'number', required: true, min: 1, label: 'Up to (g)', admin: { width: '50%' } },
           { name: 'cost', type: 'number', required: true, min: 0, label: 'Cost', admin: { width: '50%' } },
         ],
+      },
+    ],
+  }
+}
+
+/** Kitting's settings for a site (one per site): what a site owner changes without touching code. */
+export function settingsCollection(o: ResolvedSupplies): CollectionConfig {
+  const beforeChange: CollectionBeforeChangeHook = async ({ data, originalDoc, req }) => {
+    const scope = o.scopeField ? idOf(data[o.scopeField] ?? originalDoc?.[o.scopeField]) : null
+    const clash = await req.payload.find({
+      collection: o.settings as CollectionSlug,
+      where: { and: [...(originalDoc?.id ? [{ id: { not_equals: originalDoc.id } }] : []), ...(o.scopeField ? [{ [o.scopeField]: { equals: scope } }] : [])] },
+      limit: 1,
+      pagination: false,
+      ...sys,
+      req,
+    })
+    if (clash.docs.length) throw new KittingError('settingsTaken', o.scopeField ? `This ${o.scopeField} already has Kitting settings. Edit those instead.` : 'Kitting settings already exist. Edit those instead.')
+    data.title = 'Kitting settings'
+    return data
+  }
+  const refresh: CollectionAfterChangeHook = async ({ doc, req }) => {
+    await refreshStockStates(req.payload, { req, scope: o.scopeField ? idOf(doc[o.scopeField]) : null })
+    return doc
+  }
+  return {
+    slug: o.settings,
+    labels: { singular: 'Kitting settings', plural: 'Kitting settings' },
+    admin: {
+      group: o.adminGroup,
+      useAsTitle: 'title',
+      description: 'Settings for this site. Anything left empty uses the defaults set in code.',
+    },
+    access: { read: o.read, create: o.manage, update: o.manage, delete: o.manage },
+    hooks: { beforeChange: [beforeChange], afterChange: [refresh] },
+    fields: [
+      { name: 'title', type: 'text', defaultValue: 'Kitting settings', admin: { hidden: true } },
+      {
+        name: 'shrinkage',
+        type: 'select',
+        label: 'Shrinkage allowance',
+        options: [
+          { label: o.shrinkage.enabled ? 'On (the default)' : 'On', value: 'on' },
+          { label: o.shrinkage.enabled ? 'Off' : 'Off (the default)', value: 'off' },
+        ],
+        admin: {
+          description: 'Shrinkage is stock lost to damage, spoilage, defects or errors. When on, each recipe takes a little extra off stock to cover it, so stock stays close to real without counting every day. Off: recipes take exactly what they list.',
+        },
+      },
+      {
+        name: 'shrinkageDefaultPercent',
+        type: 'number',
+        min: 0,
+        max: 100,
+        label: 'Default shrinkage allowance (%)',
+        admin: { description: `For supplies without their own. Empty: ${o.shrinkage.defaultPercent}%.`, condition: (d) => d?.shrinkage !== 'off' },
       },
     ],
   }

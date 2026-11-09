@@ -1,6 +1,6 @@
 import type { Access, CollectionConfig, Config, Plugin } from 'payload'
 
-import { boxesCollection, itemsCollection, lotsCollection, postageCollection, requestsCollection, unitsCollection, movementsCollection, recipesCollection, suppliersCollection } from './collections.js'
+import { boxesCollection, settingsCollection, itemsCollection, lotsCollection, postageCollection, requestsCollection, unitsCollection, movementsCollection, recipesCollection, suppliersCollection } from './collections.js'
 import { withEcommerce } from './ecommerce.js'
 import { kittingEndpoints } from './endpoints.js'
 import type { ResolvedSupplies, KittingPluginOptions } from './types.js'
@@ -26,6 +26,7 @@ export const kittingPlugin =
       requests: options.slugs?.requests ?? 'build-requests',
       boxes: options.slugs?.boxes ?? 'box-types',
       postage: options.slugs?.postage ?? 'postage-rates',
+      settings: options.slugs?.settings ?? 'kitting-settings',
       onBuild: options.units?.onBuild,
       shippingProvider: options.shipping?.provider,
       boxSource: options.boxes?.source,
@@ -65,6 +66,7 @@ export const kittingPlugin =
       apply(requestsCollection(o), ov.requests),
       ...(o.boxSource ? [] : [apply(boxesCollection(o), ov.boxes)]),
       apply(postageCollection(o), ov.postage),
+      apply(settingsCollection(o), ov.settings),
     ]
     // Never replace a host's own collection: a clash stops startup and says how to fix it.
     const clash = (config.collections ?? []).filter((c) => added.some((a) => a.slug === c.slug)).map((c) => c.slug)

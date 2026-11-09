@@ -128,6 +128,22 @@ export function shrinkagePercent(o: Pick<ResolvedSupplies, 'shrinkage'>, item: D
   return percentOf(line?.shrinkagePercent) ?? percentOf(recipe?.shrinkagePercent) ?? percentOf(item.shrinkagePercent) ?? o.shrinkage.defaultPercent
 }
 
+/**
+ * The shrinkage settings that apply on a site: its Kitting settings in the admin, where set, else the
+ * plugin's config. Read inside the caller's transaction.
+ */
+export async function siteShrinkage(payload: Payload, o: ResolvedSupplies, req: Req, scope: ID | null): Promise<Pick<ResolvedSupplies, 'shrinkage'>> {
+  const where: Where = o.scopeField ? { [o.scopeField]: { equals: scope } } : {}
+  const doc = o.scopeField && scope === null ? undefined : ((await payload.find({ collection: o.settings as CollectionSlug, where, limit: 1, ...list, req })).docs[0] as Doc | undefined)
+  const mode = doc?.shrinkage
+  return {
+    shrinkage: {
+      enabled: mode === 'on' ? true : mode === 'off' ? false : o.shrinkage.enabled,
+      defaultPercent: percentOf(doc?.shrinkageDefaultPercent) ?? o.shrinkage.defaultPercent,
+    },
+  }
+}
+
 /** "18 g of Beans + 5% shrinkage allowance": a recipe line in plain words. */
 export function describeUse(args: { quantity: number; unit: string; name: string; percent: number; per?: string }) {
   const counted = args.unit === 'each' || args.unit === ''
@@ -235,6 +251,7 @@ export type Need = { item: Doc; base: number; allowance: number; percent: number
  */
 export async function planRecipe(payload: Payload, o: ResolvedSupplies, req: Req, top: Doc, count: number): Promise<Map<string, Need>> {
   const needs = new Map<string, Need>()
+  const site = await siteShrinkage(payload, o, req, o.scopeField ? idOf(top[o.scopeField]) : null)
   const expand = async (r: Doc, times: number, path: string[]): Promise<void> => {
     if (path.length > 8) throw new KittingError('recipeDepth', 'Recipes can be nested 8 deep at most.')
     for (const line of (r.lines ?? []) as Doc[]) {
@@ -259,7 +276,7 @@ export async function planRecipe(payload: Payload, o: ResolvedSupplies, req: Req
       const factor = conversionFactor(line.unit || item.unit, item.unit, item.packs ?? [])
       if (factor === null) throw new KittingError('unit', `"${r.name}" uses ${nameOf(item)} in ${line.unit}, which can’t be converted to ${unitOf(item)}.`)
       const base = round(quantity * factor * times)
-      const percent = shrinkagePercent(o, item, r, line)
+      const percent = shrinkagePercent(site, item, r, line)
       const allowance = round((base * percent) / 100)
       const prev = needs.get(String(item.id))
       needs.set(String(item.id), { item: prev?.item ?? item, base: round((prev?.base ?? 0) + base), allowance: round((prev?.allowance ?? 0) + allowance), percent })
@@ -532,6 +549,7 @@ export async function suggestShrinkagePercent(
   }
   const basis = { used: round(used), shrinkageAllowance: round(allowance), writtenOff: round(wasted), corrections: round(corrections), uses }
   const unit = unitOf(item)
+  const amount = (n: number) => (unit === 'each' ? String(round(n)) : plural(n, unit))
   if (uses < minUses || used <= 0)
     return { percent: null, basis, explanation: `Not enough history yet: ${uses} recipe use${uses === 1 ? '' : 's'} of ${nameOf(item)} in ${days} days (needs ${minUses}).` }
   const loss = allowance + wasted - corrections
@@ -540,9 +558,9 @@ export async function suggestShrinkagePercent(
     percent,
     basis,
     explanation:
-      `Over ${days} days recipes used ${plural(basis.used, unit)} of ${nameOf(item)}. ` +
-      `The shrinkage allowance took ${plural(basis.shrinkageAllowance, unit)}, ${plural(basis.writtenOff, unit)} was written off, ` +
-      `and counts found ${plural(Math.abs(basis.corrections), unit)} ${basis.corrections >= 0 ? 'more' : 'less'} than expected. ` +
+      `Over ${days} days recipes used ${amount(basis.used)} of ${nameOf(item)}. ` +
+      `The shrinkage allowance took ${amount(basis.shrinkageAllowance)}, ${amount(basis.writtenOff)} was written off, ` +
+      `and counts found ${amount(Math.abs(basis.corrections))} ${basis.corrections >= 0 ? 'more' : 'less'} than expected. ` +
       `That’s about ${percent}% lost.`,
   }
 }
@@ -677,6 +695,11 @@ export async function stockReport(
   const lotDocs = docs.some((d) => d.trackLots)
     ? ((await payload.find({ collection: o.lots as CollectionSlug, where: { onHand: { greater_than: 0 } }, ...access, depth: 0, pagination: false, req: options.req })).docs as Doc[])
     : []
+  const sites = new Map<string, Pick<ResolvedSupplies, 'shrinkage'>>()
+  for (const d of docs) {
+    const scope = o.scopeField ? idOf(d[o.scopeField]) : null
+    if (!sites.has(String(scope))) sites.set(String(scope), await siteShrinkage(payload, o, options.req ?? {}, scope))
+  }
   const rows = docs.map((d): StockRow => {
     const warn = num(d.expiryWarningDays) ?? o.lotWarningDays
     const lots: LotRow[] = d.trackLots
@@ -716,7 +739,10 @@ export async function stockReport(
       scopeName: scope && typeof scope === 'object' ? String(scope.name ?? scope.title ?? scope.slug ?? scope.id) : null,
       lots,
       usable: round(onHand - lots.filter((l) => l.expired).reduce((t, l) => t + l.onHand, 0)),
-      shrinkagePercent: o.shrinkage.enabled ? (percentOf(d.shrinkagePercent) ?? o.shrinkage.defaultPercent) : null,
+      shrinkagePercent: (() => {
+        const site = sites.get(String(idOf(scope)))!
+        return site.shrinkage.enabled ? (percentOf(d.shrinkagePercent) ?? site.shrinkage.defaultPercent) : null
+      })(),
     }
   })
   const expiring = rows.flatMap((r) => (r.retired ? [] : r.lots.filter((l) => l.expired || l.expiringSoon).map((l) => ({ ...l, item: r }))))

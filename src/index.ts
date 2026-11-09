@@ -28,6 +28,7 @@ export {
   KittingError,
   sendPendingAlerts,
   setupProgress,
+  siteShrinkage,
   stockCount,
   stockReport,
   type CountLine,
