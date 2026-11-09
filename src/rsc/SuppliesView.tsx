@@ -75,6 +75,9 @@ export async function SuppliesView({ initPageResult, params, searchParams }: Adm
     ready.push({ status: await readyStatus(req.payload, r), recs: (await recommendReadyStock(req.payload, r.id)).recommendations, waiting })
   }
   const setup = canManage ? await setupProgress(req.payload, { user: req.user }) : null
+  // With Restock installed: deliveries waiting for someone to confirm (crossing kitting-restock). Never adds stock.
+  const restock = req.payload.config.custom?.restock as { arrived?: (args: { payload: typeof req.payload; user?: unknown }) => Promise<{ id: unknown; number: string; supplier: string }[]>; orders?: string } | undefined
+  const arrivals = canManage && restock?.arrived ? await restock.arrived({ payload: req.payload, user: req.user }).catch(() => []) : []
   const toBuild = ready.filter((x) => x.status.state === 'build-more' || x.status.state === 'urgent')
   const waitingTotal = ready.reduce((t, x) => t + x.waiting, 0)
   const current = rows.filter((r) => !r.retired)
@@ -154,6 +157,21 @@ export async function SuppliesView({ initPageResult, params, searchParams }: Adm
             <section aria-labelledby="supplies-today">
               <h2 id="supplies-today" style={{ marginTop: 0 }}>Today</h2>
               <ul style={{ margin: 0, paddingInlineStart: 20 }}>
+                {arrivals.length > 0 && (
+                  <li>
+                    <strong>Arrived, please confirm:</strong>{' '}
+                    {arrivals.map((a, i) => (
+                      <React.Fragment key={String(a.id)}>
+                        {i ? ', ' : ''}
+                        <a href={`${admin}/collections/${restock?.orders ?? 'purchase-orders'}/${String(a.id)}`}>
+                          {a.number}
+                          {a.supplier ? ` from ${a.supplier}` : ''}
+                        </a>
+                      </React.Fragment>
+                    ))}
+                    . Nothing is added to stock until someone checks the boxes.
+                  </li>
+                )}
                 <li>
                   {below.length ? (
                     <a href="#supplies-reorder">

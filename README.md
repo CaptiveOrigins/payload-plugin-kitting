@@ -37,7 +37,7 @@ Today levels 1 and 2 are always on together; the switches come with the builder.
 
 - **Getting started** at `/admin/supplies/setup`: three steps in plain words (your supplies, what you make, a first stock count), with what's done so far. Until all three are done, the overview links to it.
 - **Stock count** at `/admin/supplies/count`: type what's really on the shelf; empty boxes are skipped, and you see each difference before saving. Each difference becomes one adjustment ("Stock count") in one transaction. With lots, a shortfall comes off expired lots first, then the first to expire, and extra goes into the newest lot. Also `stockCount(payload, [{ item, counted }])` and `POST /api/kitting/count`, which refuses the whole count if any supply isn't the person's to manage.
-- **Today** at the top of the overview: what to buy (supplies below level, by supplier), what to build (with urgent ones marked, and kits waiting for orders), and what to use soon.
+- **Today** at the top of the overview: what to buy (supplies below level, by supplier), what to build (with urgent ones marked, and kits waiting for orders), and what to use soon. With Restock installed, it starts with deliveries that arrived and wait for someone to confirm them. Nothing is added to stock until a person does.
 
 Later, not yet: ordering from suppliers when something stays low for a few days (see [docs/roadmap.md](docs/roadmap.md)), and turning till sales into usage.
 
