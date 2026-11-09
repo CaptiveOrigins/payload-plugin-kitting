@@ -98,10 +98,12 @@ export async function SuppliesView({ initPageResult, params, searchParams }: Adm
           <>
             <nav aria-label="Supplies actions">
               <ul style={{ display: 'flex', gap: 8, flexWrap: 'wrap', listStyle: 'none', padding: 0, margin: 0 }}>
-                <li><a className="btn btn--style-primary btn--size-small" style={{ margin: 0 }} href={`${admin}/collections/${o.movements}/create`}>Record a movement</a></li>
+                <li><a className="btn btn--style-primary btn--size-small" style={{ margin: 0 }} href={`${admin}/supplies/build`}>Build</a></li>
+                <li><a className="btn btn--style-secondary btn--size-small" style={{ margin: 0 }} href={`${admin}/collections/${o.movements}/create`}>Record a movement</a></li>
                 <li><a className="btn btn--style-secondary btn--size-small" style={{ margin: 0 }} href={`${admin}/collections/${o.items}/create`}>Add a supply</a></li>
                 <li><a className="btn btn--style-secondary btn--size-small" style={{ margin: 0 }} href={`${admin}/collections/${o.recipes}`}>Recipes</a></li>
                 <li><a className="btn btn--style-secondary btn--size-small" style={{ margin: 0 }} href={`${admin}/collections/${o.suppliers}`}>Suppliers</a></li>
+                <li><a className="btn btn--style-secondary btn--size-small" style={{ margin: 0 }} href={`${admin}/collections/${o.units}`}>Built units</a></li>
                 <li><a className="btn btn--style-secondary btn--size-small" style={{ margin: 0 }} href={`${admin}/collections/${o.lots}`}>Lots</a></li>
                 <li><a className="btn btn--style-secondary btn--size-small" style={{ margin: 0 }} href={`${admin}/collections/${o.movements}`}>Stock log</a></li>
               </ul>

@@ -35,8 +35,15 @@ export type AlertItem = {
 }
 
 export type KittingPluginOptions = {
-  /** Collection slugs. Defaults: `supply-items`, `suppliers`, `supply-movements`, `supply-recipes`, `supply-lots`. */
-  slugs?: { items?: string; suppliers?: string; movements?: string; recipes?: string; lots?: string }
+  /** Collection slugs. Defaults: `supply-items`, `suppliers`, `supply-movements`, `supply-recipes`, `supply-lots`, `assembled-units`. */
+  slugs?: { items?: string; suppliers?: string; movements?: string; recipes?: string; lots?: string; units?: string }
+  /**
+   * Built units (level 2): things you build from a recipe and label with an external ID, such as a
+   * kit with the ID printed on its tube. `onBuild` runs for each unit inside the build's transaction,
+   * so your own record (for example a kit in your app) is created or linked in the same commit; throw
+   * to refuse the build.
+   */
+  units?: { onBuild?: (args: { payload: Payload; req: Partial<PayloadRequest>; unit: BuiltUnit; recipe: { id: ID; name: string; key: string } }) => void | Promise<void> }
   /**
    * Who may do what. Plain Payload access functions, so they can return a query (for example
    * "only my sites"). `manage` adds and edits items, suppliers and recipes and records movements;
@@ -83,6 +90,7 @@ export type KittingPluginOptions = {
     movements?: (c: CollectionConfig) => CollectionConfig
     recipes?: (c: CollectionConfig) => CollectionConfig
     lots?: (c: CollectionConfig) => CollectionConfig
+    units?: (c: CollectionConfig) => CollectionConfig
   }
   /** Add the Supplies overview at /admin/supplies (below level, reorder list, all stock). Default true. */
   adminView?: boolean
@@ -96,6 +104,8 @@ export type ResolvedSupplies = {
   movements: string
   recipes: string
   lots: string
+  units: string
+  onBuild?: NonNullable<KittingPluginOptions['units']>['onBuild']
   userSlug: string
   read: Access
   manage: Access
@@ -142,5 +152,30 @@ export type ApplyRecipeResult = {
   /** One per item and lot used. `allowance` is the part of `change` that is the waste allowance. */
   movements: { id: ID; item: ID; lot: ID | null; change: number; allowance: number; onHandAfter: number }[]
   /** Items that went below zero (only with `negativeStock: 'warn'`). */
+  shortages: Shortage[]
+}
+
+export type UnitStatus = 'ready' | 'assigned' | 'shipped' | 'void'
+
+/** What went into one built unit: per item, which lot and how much (in the item's unit). */
+export type LotUse = { item: ID; lot: ID | null; quantity: number }
+
+export type BuiltUnit = { id: ID; externalId: string; status: UnitStatus; lotsUsed: LotUse[]; scope?: ID | null }
+
+export type BuildContext = {
+  /** Join the caller's transaction. Call `sendPendingAlerts(payload)` after your commit. */
+  req?: Partial<PayloadRequest>
+  /** The scope (tenant id) to find a recipe key in. */
+  scope?: ID
+  user?: { id: ID } | null
+  /** Shown on each movement. Default "Build of <n> × <recipe>". */
+  reference?: string
+  negativeStock?: NegativeStock
+}
+
+export type BuildResult = {
+  recipe: { id: ID; name: string }
+  units: BuiltUnit[]
+  movements: ApplyRecipeResult['movements']
   shortages: Shortage[]
 }

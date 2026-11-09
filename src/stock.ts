@@ -26,7 +26,7 @@ export const idOf = (v: unknown): ID | null => (v && typeof v === 'object' ? ((v
 export const sameID = (a: unknown, b: unknown) => String(idOf(a) ?? '') === String(idOf(b) ?? '')
 /** Quantities may be fractional (ml, metres); keep sums free of floating-point dust. */
 export const round = (n: number) => Math.round(n * 1e6) / 1e6
-const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+export const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
 
 /** An item is below level when a level is set and on hand is under it. */
 export const isBelowLevel = (onHand: number, level: unknown) => num(level) !== null && onHand < (level as number)
@@ -95,7 +95,7 @@ const nameOf = (item: Doc) => String(item.name ?? 'Unnamed supply')
 const unitOf = (item: Doc) => String(item.unit || 'each')
 const plural = (n: number, unit: string) => `${n} ${unit}`
 
-async function findRecipe(payload: Payload, o: ResolvedSupplies, req: Req, ref: RecipeRef | Doc, scope?: ID): Promise<Doc> {
+export async function findRecipe(payload: Payload, o: ResolvedSupplies, req: Req, ref: RecipeRef | Doc, scope?: ID): Promise<Doc> {
   if ('key' in ref && typeof ref.key === 'string' && !('id' in ref)) {
     if (o.scopeField && (scope === undefined || scope === null)) throw new KittingError('scope', `Say which ${o.scopeField} the recipe "${ref.key}" belongs to.`)
     const where: Where = o.scopeField ? { and: [{ key: { equals: ref.key } }, { [o.scopeField]: { equals: scope } }] } : { key: { equals: ref.key } }
@@ -110,7 +110,7 @@ async function findRecipe(payload: Payload, o: ResolvedSupplies, req: Req, ref: 
   return found
 }
 
-const getItem = async (payload: Payload, o: ResolvedSupplies, req: Req, id: unknown) =>
+export const getItem = async (payload: Payload, o: ResolvedSupplies, req: Req, id: unknown) =>
   idOf(id) === null ? null : ((await payload.findByID({ collection: o.items as CollectionSlug, id: idOf(id)!, ...sys, joins: false, disableErrors: true, req })) as Doc | null)
 
 // ---------------------------------------------------------------------------------------------
@@ -224,25 +224,46 @@ export function allocate(item: Doc, lots: Doc[], quantity: number, now = new Dat
 // ---------------------------------------------------------------------------------------------
 // Using a recipe
 
-type Need = { item: Doc; base: number; allowance: number; percent: number }
+export type Need = { item: Doc; base: number; allowance: number; percent: number }
 
-/** What `count` of a recipe takes from each item, in the item's unit, with the waste allowance. */
-async function planRecipe(payload: Payload, o: ResolvedSupplies, req: Req, r: Doc, count: number): Promise<Map<string, Need>> {
+/**
+ * What `count` of a recipe takes from each item, in the item's unit, with the waste allowance.
+ * Lines that use another recipe are expanded into that recipe's supplies (scaled by what it makes),
+ * however deep, and refused if a recipe would use itself.
+ */
+export async function planRecipe(payload: Payload, o: ResolvedSupplies, req: Req, top: Doc, count: number): Promise<Map<string, Need>> {
   const needs = new Map<string, Need>()
-  for (const line of (r.lines ?? []) as Doc[]) {
-    const quantity = num(line.quantity)
-    if (idOf(line.item) === null || quantity === null || quantity <= 0) continue
-    const item = await getItem(payload, o, req, line.item)
-    if (!item) throw new KittingError('itemNotFound', `A supply in "${r.name}" no longer exists. Edit the recipe.`)
-    if (o.scopeField && !sameID(item[o.scopeField], r[o.scopeField])) throw new KittingError('scope', `"${nameOf(item)}" belongs somewhere else than the recipe "${r.name}".`)
-    const factor = conversionFactor(line.unit || item.unit, item.unit, item.packs ?? [])
-    if (factor === null) throw new KittingError('unit', `"${r.name}" uses ${nameOf(item)} in ${line.unit}, which can’t be converted to ${unitOf(item)}.`)
-    const base = round(quantity * factor * count)
-    const percent = wastePercent(o, item, r, line)
-    const allowance = round((base * percent) / 100)
-    const prev = needs.get(String(item.id))
-    needs.set(String(item.id), { item, base: round((prev?.base ?? 0) + base), allowance: round((prev?.allowance ?? 0) + allowance), percent })
+  const expand = async (r: Doc, times: number, path: string[]): Promise<void> => {
+    if (path.length > 8) throw new KittingError('recipeDepth', 'Recipes can be nested 8 deep at most.')
+    for (const line of (r.lines ?? []) as Doc[]) {
+      const quantity = num(line.quantity)
+      if (quantity === null || quantity <= 0) continue
+      if (line.type === 'recipe') {
+        const subID = idOf(line.recipe)
+        if (subID === null) continue
+        if (path.includes(String(subID))) throw new KittingError('recipeCycle', `"${r.name}" uses a recipe that uses it back.`)
+        const sub = await findRecipe(payload, o, req, { id: subID })
+        if (o.scopeField && !sameID(sub[o.scopeField], r[o.scopeField])) throw new KittingError('scope', `"${sub.name}" belongs somewhere else than "${r.name}".`)
+        const makes = num(sub.makes) ?? 1
+        const factor = conversionFactor(line.unit || sub.makesUnit || 'each', sub.makesUnit || 'each')
+        if (factor === null) throw new KittingError('unit', `"${r.name}" uses "${sub.name}" in ${line.unit}, but it makes ${sub.makesUnit}.`)
+        await expand(sub, (times * quantity * factor) / makes, [...path, String(subID)])
+        continue
+      }
+      if (idOf(line.item) === null) continue
+      const item = await getItem(payload, o, req, line.item)
+      if (!item) throw new KittingError('itemNotFound', `A supply in "${r.name}" no longer exists. Edit the recipe.`)
+      if (o.scopeField && !sameID(item[o.scopeField], r[o.scopeField])) throw new KittingError('scope', `"${nameOf(item)}" belongs somewhere else than the recipe "${r.name}".`)
+      const factor = conversionFactor(line.unit || item.unit, item.unit, item.packs ?? [])
+      if (factor === null) throw new KittingError('unit', `"${r.name}" uses ${nameOf(item)} in ${line.unit}, which can’t be converted to ${unitOf(item)}.`)
+      const base = round(quantity * factor * times)
+      const percent = wastePercent(o, item, r, line)
+      const allowance = round((base * percent) / 100)
+      const prev = needs.get(String(item.id))
+      needs.set(String(item.id), { item: prev?.item ?? item, base: round((prev?.base ?? 0) + base), allowance: round((prev?.allowance ?? 0) + allowance), percent })
+    }
   }
+  await expand(top, count, [String(top.id)])
   return needs
 }
 

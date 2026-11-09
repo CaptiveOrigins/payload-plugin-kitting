@@ -1,4 +1,5 @@
 export { kittingPlugin } from './plugin.js'
+export { buildUnits, cleanExternalIds, splitLots, voidUnit, type VoidReason } from './build.js'
 export {
   ALLOW_DELETE,
   allocate,
@@ -22,6 +23,11 @@ export type {
   AlertStatus,
   ApplyRecipeContext,
   ApplyRecipeResult,
+  BuildContext,
+  BuildResult,
+  BuiltUnit,
+  LotUse,
+  UnitStatus,
   MovementKind,
   WasteReason,
   NegativeStock,

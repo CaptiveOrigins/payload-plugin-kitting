@@ -336,6 +336,26 @@ export function movementsCollection(o: ResolvedSupplies): CollectionConfig {
 
 const KEY = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
+const MAX_DEPTH = 8
+
+/** A recipe can use other recipes, but never itself, however deep. */
+async function refuseCycle(req: PayloadRequest, o: ResolvedSupplies, selfID: unknown, lines: Doc[]) {
+  const seen = new Set<string>()
+  const walk = async (ls: Doc[], depth: number, path: string[]): Promise<void> => {
+    for (const line of ls) {
+      if (line.type !== 'recipe' || idOf(line.recipe) === null) continue
+      const id = String(idOf(line.recipe))
+      if (selfID !== null && id === String(selfID)) throw new KittingError('recipeCycle', `This recipe would use itself (through ${[...path, 'itself'].join(' → ')}).`)
+      if (depth >= MAX_DEPTH) throw new KittingError('recipeDepth', `Recipes can be nested ${MAX_DEPTH} deep at most.`)
+      if (seen.has(id)) continue
+      seen.add(id)
+      const sub = (await req.payload.findByID({ collection: o.recipes as CollectionSlug, id, ...sys, disableErrors: true, req })) as Doc | null
+      if (sub) await walk((sub.lines ?? []) as Doc[], depth + 1, [...path, String(sub.name)])
+    }
+  }
+  await walk(lines, 1, [])
+}
+
 export function recipesCollection(o: ResolvedSupplies): CollectionConfig {
   const beforeChange: CollectionBeforeChangeHook = async ({ data, originalDoc, req }) => {
     const key = String(data.key ?? originalDoc?.key ?? '')
@@ -353,7 +373,21 @@ export function recipesCollection(o: ResolvedSupplies): CollectionConfig {
       req,
     })
     if (clash.docs.length) throw new KittingError('keyTaken', `Another recipe already uses the key "${key}".`)
-    for (const line of (data.lines ?? []) as Doc[]) await sameScope(req, o, scope, o.items, line.item, 'A supply in this recipe')
+    for (const line of (data.lines ?? []) as Doc[]) {
+      if (line.type === 'recipe') {
+        if (idOf(line.recipe) === null) throw new KittingError('lineRecipe', 'Choose the recipe this line uses.')
+        line.item = null
+        await sameScope(req, o, scope, o.recipes, line.recipe, 'A recipe used in this one')
+      } else {
+        if (idOf(line.item) === null) throw new KittingError('lineItem', 'Choose the supply this line uses.')
+        line.type = 'item'
+        line.recipe = null
+        await sameScope(req, o, scope, o.items, line.item, 'A supply in this recipe')
+      }
+    }
+    if (data.makes !== undefined && data.makes !== null && !(typeof data.makes === 'number' && data.makes > 0)) throw new KittingError('makes', '“Makes” is more than zero.')
+    if (data.makesUnit !== undefined) data.makesUnit = normalizeUnit(data.makesUnit) || 'each'
+    await refuseCycle(req, o, originalDoc?.id ?? null, (data.lines ?? originalDoc?.lines ?? []) as Doc[])
     return data
   }
   return {
@@ -370,7 +404,21 @@ export function recipesCollection(o: ResolvedSupplies): CollectionConfig {
     fields: [
       { name: 'name', type: 'text', required: true, label: 'What it makes', admin: { description: 'For example: Gift box.' } },
       { name: 'key', type: 'text', required: true, index: true, label: 'Key', admin: { description: 'A short code the site’s software uses to find this recipe, like gift-box.' } },
-      { name: 'active', type: 'checkbox', defaultValue: true, label: 'In use', admin: { position: 'sidebar', description: 'Switched off, it can’t be used.' } },
+      { name: 'active', type: 'checkbox', defaultValue: true, label: 'In use', admin: { position: 'sidebar', description: 'Switched off, it can’t be used on its own. Recipes that use it still can.' } },
+      {
+        type: 'row',
+        fields: [
+          { name: 'makes', type: 'number', defaultValue: 1, min: 0.000001, label: 'Makes', admin: { width: '50%', description: 'How much one batch of this makes, for example 1000 (ml of syrup). Usually 1.' } },
+          { name: 'makesUnit', type: 'text', defaultValue: 'each', label: 'Of', admin: { width: '50%', description: 'each, ml, g…' } },
+        ],
+      },
+      {
+        name: 'maxPerBatch',
+        type: 'number',
+        min: 1,
+        label: 'Most to build at once',
+        admin: { position: 'sidebar', description: 'The builder refuses a bigger batch. Empty: no limit.' },
+      },
       {
         name: 'lines',
         type: 'array',
@@ -380,12 +428,43 @@ export function recipesCollection(o: ResolvedSupplies): CollectionConfig {
         labels: { singular: 'Supply', plural: 'Supplies' },
         fields: [
           {
+            name: 'type',
+            type: 'radio',
+            defaultValue: 'item',
+            label: 'Uses',
+            options: [
+              { label: 'A supply', value: 'item' },
+              { label: 'Another recipe', value: 'recipe' },
+            ],
+            admin: { layout: 'horizontal', description: 'Another recipe: for example a house syrup used in many drinks. Its supplies are used too.' },
+          },
+          {
             type: 'row',
             fields: [
-              { name: 'item', type: 'relationship', relationTo: o.items as CollectionSlug, required: true, label: 'Supply', admin: { width: '40%' } },
+              {
+                name: 'item',
+                type: 'relationship',
+                relationTo: o.items as CollectionSlug,
+                label: 'Supply',
+                admin: { width: '40%', condition: (_d, sibling) => sibling?.type !== 'recipe' },
+              },
+              {
+                name: 'recipe',
+                type: 'relationship',
+                relationTo: o.recipes as CollectionSlug,
+                label: 'Recipe',
+                admin: { width: '40%', condition: (_d, sibling) => sibling?.type === 'recipe' },
+              },
               { name: 'quantity', type: 'number', required: true, min: 0.000001, label: 'Quantity for one', admin: { width: '20%' } },
-              { name: 'unit', type: 'text', label: 'Unit', admin: { width: '20%', description: 'Empty: the supply’s unit.' } },
-              { name: 'wastePercent', type: 'number', min: 0, max: 100, label: 'Waste %', admin: { width: '20%', description: 'Empty: the recipe’s or supply’s.' } },
+              { name: 'unit', type: 'text', label: 'Unit', admin: { width: '20%', description: 'Empty: the supply’s unit, or what the recipe makes.' } },
+              {
+                name: 'wastePercent',
+                type: 'number',
+                min: 0,
+                max: 100,
+                label: 'Waste %',
+                admin: { width: '20%', description: 'Empty: the recipe’s or supply’s.', condition: (_d, sibling) => sibling?.type !== 'recipe' },
+              },
             ],
           },
           { name: 'note', type: 'text', label: 'Note' },
@@ -461,6 +540,94 @@ export function lotsCollection(o: ResolvedSupplies): CollectionConfig {
       { name: 'onHand', type: 'number', defaultValue: 0, label: 'On hand', admin: { readOnly: true, description: 'Changes only through stock movements.' } },
       { name: 'receivedOn', type: 'date', label: 'Received', admin: { position: 'sidebar', date: { pickerAppearance: 'dayAndTime' } } },
       { name: 'label', type: 'text', label: 'Label', admin: { hidden: true } },
+      { name: 'notes', type: 'textarea', label: 'Notes' },
+    ],
+  }
+}
+
+const UNIT_FIELDS_BY_HAND = ['notes']
+
+export function unitsCollection(o: ResolvedSupplies): CollectionConfig {
+  const beforeChange: CollectionBeforeChangeHook = async ({ data, originalDoc, operation, req }) => {
+    if (req.context?.[INTERNAL]) return data
+    if (operation === 'create') throw new KittingError('useBuilder', 'Units are made with the builder, so their supplies come off stock.')
+    // By hand, only notes change: status, lots and IDs change through the builder and its API.
+    const kept: Doc = { ...originalDoc }
+    for (const f of UNIT_FIELDS_BY_HAND) if (data[f] !== undefined) kept[f] = data[f]
+    return kept
+  }
+  const beforeDelete: CollectionBeforeDeleteHook = ({ req }) => {
+    if (!req.context?.[ALLOW_DELETE]) throw new KittingError('appendOnly', 'Built units can’t be deleted. Void one instead.')
+  }
+  const lotRow = (name: string, label: string) => ({ name, type: 'relationship' as const, relationTo: (name === 'lot' ? o.lots : o.items) as CollectionSlug, label, admin: { readOnly: true, width: '40%' } })
+  return {
+    slug: o.units,
+    labels: { singular: 'Built unit', plural: 'Built units' },
+    admin: {
+      group: o.adminGroup,
+      useAsTitle: 'externalId',
+      defaultColumns: ['externalId', 'recipe', 'status', 'builtAt', 'assignedTo'],
+      description: 'Things built from a recipe, each with its own ID. Build them on the Build page; each records the lots that went into it.',
+    },
+    defaultSort: '-builtAt',
+    access: { read: o.read, create: o.manage, update: o.manage, delete: o.manage },
+    hooks: { beforeChange: [beforeChange], beforeDelete: [beforeDelete] },
+    fields: [
+      { name: 'externalId', type: 'text', required: true, index: true, label: 'ID', admin: { readOnly: true, description: 'The ID on the unit, for example the one printed on a tube.' } },
+      { name: 'recipe', type: 'relationship', relationTo: o.recipes as CollectionSlug, required: true, label: 'Recipe', admin: { readOnly: true } },
+      {
+        name: 'status',
+        type: 'select',
+        required: true,
+        defaultValue: 'ready',
+        label: 'Status',
+        options: [
+          { label: 'Ready', value: 'ready' },
+          { label: 'Assigned to an order', value: 'assigned' },
+          { label: 'Shipped', value: 'shipped' },
+          { label: 'Void', value: 'void' },
+        ],
+        admin: { readOnly: true, position: 'sidebar' },
+      },
+      {
+        name: 'lotsUsed',
+        type: 'array',
+        label: 'What went into it',
+        admin: { readOnly: true },
+        fields: [
+          {
+            type: 'row',
+            fields: [lotRow('item', 'Supply'), lotRow('lot', 'Lot'), { name: 'quantity', type: 'number', label: 'Quantity', admin: { readOnly: true, width: '20%' } }],
+          },
+        ],
+      },
+      { name: 'builtAt', type: 'date', label: 'Built', admin: { readOnly: true, position: 'sidebar', date: { pickerAppearance: 'dayAndTime' } } },
+      { name: 'builtBy', type: 'relationship', relationTo: o.userSlug as CollectionSlug, label: 'Built by', admin: { readOnly: true, position: 'sidebar' } },
+      { name: 'reference', type: 'text', label: 'Reference', admin: { readOnly: true, position: 'sidebar' } },
+      { name: 'assignedTo', type: 'text', label: 'Assigned to', admin: { readOnly: true, position: 'sidebar', description: 'The order it went to.' } },
+      { name: 'assignedAt', type: 'date', label: 'Assigned', admin: { readOnly: true, position: 'sidebar', date: { pickerAppearance: 'dayAndTime' } } },
+      {
+        type: 'collapsible',
+        label: 'Voided',
+        admin: { condition: (d) => d?.status === 'void' },
+        fields: [
+          {
+            name: 'voidReason',
+            type: 'select',
+            label: 'Why',
+            options: [
+              { label: 'A dud', value: 'dud' },
+              { label: 'Damaged', value: 'damaged' },
+              { label: 'Built by mistake', value: 'mistake' },
+              { label: 'Other', value: 'other' },
+            ],
+            admin: { readOnly: true },
+          },
+          { name: 'voidNote', type: 'text', label: 'Note', admin: { readOnly: true } },
+          { name: 'voidedAt', type: 'date', label: 'Voided', admin: { readOnly: true, date: { pickerAppearance: 'dayAndTime' } } },
+          { name: 'returnedToStock', type: 'checkbox', label: 'Supplies went back to stock', admin: { readOnly: true } },
+        ],
+      },
       { name: 'notes', type: 'textarea', label: 'Notes' },
     ],
   }

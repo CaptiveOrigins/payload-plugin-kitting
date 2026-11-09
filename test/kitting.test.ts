@@ -3,7 +3,7 @@ import { MongoMemoryReplSet } from 'mongodb-memory-server'
 import { buildConfig, getPayload, type Access, type CollectionConfig, type Field, type Payload } from 'payload'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
-import { applyRecipe, kittingPlugin, KittingError, sendPendingAlerts, stockReport, suggestWastePercent, writeOffExpired } from '../src/index.js'
+import { applyRecipe, buildUnits, kittingPlugin, KittingError, voidUnit, sendPendingAlerts, stockReport, suggestWastePercent, writeOffExpired } from '../src/index.js'
 
 // Made-up data throughout: example.com addresses, invented supplies and sites.
 type Doc = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -11,6 +11,8 @@ type Doc = Record<string, any> // eslint-disable-line @typescript-eslint/no-expl
 let payload: Payload
 let mongo: MongoMemoryReplSet
 const mail: { to: string[]; subject: string; text: string }[] = []
+const onBuilt: string[] = []
+let refuseBuild = ''
 let emailOn = true
 
 const ids = (v: unknown) => ((v as unknown[]) ?? []).map((t) => (t && typeof t === 'object' ? String((t as Doc).id) : String(t)))
@@ -60,7 +62,13 @@ beforeAll(async () => {
             canSend: () => emailOn,
             sendEmail: async ({ to, subject, text }) => void mail.push({ to, subject, text }),
           },
-          overrides: { items: withTenant, suppliers: withTenant, movements: withTenant, recipes: withTenant, lots: withTenant },
+          overrides: { items: withTenant, suppliers: withTenant, movements: withTenant, recipes: withTenant, lots: withTenant, units: withTenant },
+          units: {
+            onBuild: ({ unit }) => {
+              if (unit.externalId === refuseBuild) throw new Error('the host said no')
+              onBuilt.push(unit.externalId)
+            },
+          },
         }),
       ],
     }),
@@ -413,5 +421,140 @@ describe('units and the waste allowance', () => {
     expect(wasted).toEqual([expect.objectContaining({ wasteReason: 'expired', change: -5 })])
     expect((await get('supply-items', swab.id)).onHand).toBe(17)
     expect(sum(await movementsOf(swab))).toBe(17)
+  })
+})
+
+describe('nested recipes', () => {
+  it('draws down a recipe used inside another, scaled by what it makes', async () => {
+    const sugar = await create('supply-items', { tenant: siteA.id, name: 'Sugar', unit: 'g', openingStock: 5000 })
+    const water = await create('supply-items', { tenant: siteA.id, name: 'Water', unit: 'ml', openingStock: 5000 })
+    const beans = await create('supply-items', { tenant: siteA.id, name: 'Beans', unit: 'g', openingStock: 5000 })
+    const syrup = await create('supply-recipes', {
+      tenant: siteA.id,
+      name: 'House syrup',
+      key: `syrup-${Math.random().toString(36).slice(2, 8)}`,
+      makes: 1,
+      makesUnit: 'litre',
+      lines: [
+        { item: sugar.id, quantity: 500 },
+        { item: water.id, quantity: 500 },
+      ],
+    })
+    expect(syrup.makesUnit).toBe('l')
+    const latte = await create('supply-recipes', {
+      tenant: siteA.id,
+      name: 'Syrup latte',
+      key: `sl-${Math.random().toString(36).slice(2, 8)}`,
+      lines: [
+        { item: beans.id, quantity: 18 },
+        { type: 'recipe', recipe: syrup.id, quantity: 20, unit: 'ml' },
+      ],
+    })
+    await applyRecipe(payload, { id: latte.id }, 10, { scope: siteA.id })
+    // 10 lattes × 20 ml = 200 ml of a 1 l batch: a fifth of 500 g sugar and 500 ml water.
+    expect([(await get('supply-items', sugar.id)).onHand, (await get('supply-items', water.id)).onHand, (await get('supply-items', beans.id)).onHand]).toEqual([4900, 4900, 4820])
+    await expect(payload.update({ collection: 'supply-recipes' as never, id: syrup.id, data: { lines: [...syrup.lines, { type: 'recipe', recipe: latte.id, quantity: 1 }] } as never })).rejects.toThrow(/would use itself/)
+    await expect(payload.update({ collection: 'supply-recipes' as never, id: syrup.id, data: { lines: [{ type: 'recipe', recipe: syrup.id, quantity: 1 }] } as never })).rejects.toThrow(/would use itself/)
+    const otherSite = await create('supply-recipes', { tenant: siteB.id, name: 'B syrup', key: 'b-syrup', lines: [{ item: (await create('supply-items', { tenant: siteB.id, name: 'B sugar', unit: 'g' })).id, quantity: 1 }] })
+    await expect(create('supply-recipes', { tenant: siteA.id, name: 'Mixed', key: 'mixed', lines: [{ type: 'recipe', recipe: otherSite.id, quantity: 1 }] })).rejects.toThrow(/belongs to another tenant/)
+  })
+})
+
+describe('the builder', () => {
+  async function kit() {
+    const swab = await create('supply-items', { tenant: siteA.id, name: 'Build swab', unit: 'each', trackLots: true, openingStock: 3, openingLotNumber: 'S-A', openingExpiresOn: '2099-01-01T00:00:00.000Z' })
+    await create('supply-movements', { item: swab.id, kind: 'received', quantity: 10, lotNumber: 'S-B', expiresOn: '2099-06-01T00:00:00.000Z' }, as(staffA))
+    const tube = await create('supply-items', { tenant: siteA.id, name: 'Build tube', unit: 'each', openingStock: 10 })
+    const recipe = await create('supply-recipes', {
+      tenant: siteA.id,
+      name: 'Sample kit',
+      key: `sk-${Math.random().toString(36).slice(2, 8)}`,
+      maxPerBatch: 3,
+      lines: [
+        { item: swab.id, quantity: 2 },
+        { item: tube.id, quantity: 1 },
+      ],
+    })
+    const lots = Object.fromEntries(((await payload.find({ collection: 'supply-lots' as never, where: { item: { equals: swab.id } }, depth: 0 })).docs as Doc[]).map((l) => [l.lotNumber, String(l.id)]))
+    return { swab, tube, recipe, lots }
+  }
+  const run = () => Math.random().toString(36).slice(2, 7).toUpperCase()
+
+  it('builds one unit per ID, recording the lots that went into each', async () => {
+    const { swab, tube, recipe, lots } = await kit()
+    const [k1, k2] = [`K1-${run()}`, `K2-${run()}`]
+    const r = await buildUnits(payload, { id: recipe.id }, [k1, ` ${k2} `], { scope: siteA.id, user: { id: staffA.id } })
+    expect(r.units.map((u) => [u.externalId, u.status, String(u.scope)])).toEqual([
+      [k1, 'ready', String(siteA.id)],
+      [k2, 'ready', String(siteA.id)],
+    ])
+    const uses = (u: (typeof r.units)[number]) => u.lotsUsed.map((l) => [String(l.item) === String(swab.id) ? 'swab' : 'tube', l.lot === null ? null : String(l.lot), l.quantity])
+    expect(uses(r.units[0]!)).toEqual([
+      ['swab', lots['S-A'], 2],
+      ['tube', null, 1],
+    ])
+    expect(uses(r.units[1]!)).toEqual([
+      ['swab', lots['S-A'], 1],
+      ['swab', lots['S-B'], 1],
+      ['tube', null, 1],
+    ])
+    expect((await get('supply-items', swab.id)).onHand).toBe(9)
+    expect((await get('supply-items', tube.id)).onHand).toBe(8)
+    expect(onBuilt).toEqual(expect.arrayContaining([k1, k2]))
+    const unit = (await payload.find({ collection: 'assembled-units' as never, where: { externalId: { equals: k1 } }, depth: 0 })).docs[0] as Doc
+    expect(String(unit.builtBy)).toBe(String(staffA.id))
+  })
+
+  it('refuses repeats, IDs already built, oversize batches, and anything the host refuses, changing nothing', async () => {
+    const { swab, recipe } = await kit()
+    const k = `R-${run()}`
+    await buildUnits(payload, { id: recipe.id }, [k], { scope: siteA.id })
+    const code = (p: Promise<unknown>) => p.then(() => 'built', (e) => (e as KittingError).code ?? String(e))
+    expect(await code(buildUnits(payload, { id: recipe.id }, ['X', 'X'], { scope: siteA.id }))).toBe('duplicateId')
+    expect(await code(buildUnits(payload, { id: recipe.id }, [k], { scope: siteA.id }))).toBe('idTaken')
+    expect(await code(buildUnits(payload, { id: recipe.id }, ['a', 'b', 'c', 'd'], { scope: siteA.id }))).toBe('batchLimit')
+    expect(await code(buildUnits(payload, { id: recipe.id }, ['', 'b'], { scope: siteA.id }))).toBe('externalId')
+    refuseBuild = `NO-${run()}`
+    expect(await code(buildUnits(payload, { id: recipe.id }, [refuseBuild], { scope: siteA.id }))).not.toBe('built')
+    refuseBuild = ''
+    expect((await get('supply-items', swab.id)).onHand).toBe(11)
+    // The same ID on another site is fine: IDs are unique per site.
+    const b = await create('supply-recipes', { tenant: siteB.id, name: 'B kit', key: `bk-${run().toLowerCase()}`, lines: [{ item: (await create('supply-items', { tenant: siteB.id, name: 'B swab', unit: 'each', openingStock: 5 })).id, quantity: 1 }] })
+    expect((await buildUnits(payload, { id: b.id }, [k], { scope: siteB.id })).units).toHaveLength(1)
+  })
+
+  it('keeps units out of reach by hand, and voids them with or without returning their supplies', async () => {
+    const { swab, recipe, lots } = await kit()
+    const [a, b] = [`V1-${run()}`, `V2-${run()}`]
+    const { units } = await buildUnits(payload, { id: recipe.id }, [a, b], { scope: siteA.id })
+    await expect(create('assembled-units', { tenant: siteA.id, externalId: 'HAND', recipe: recipe.id }, as(staffA))).rejects.toThrow(/made with the builder/)
+    await payload.update({ collection: 'assembled-units' as never, id: units[0]!.id, data: { status: 'shipped', notes: 'checked' } as never, ...as(staffA) })
+    expect(await get('assembled-units', units[0]!.id)).toMatchObject({ status: 'ready', notes: 'checked' })
+    await expect(payload.delete({ collection: 'assembled-units' as never, id: units[0]!.id, ...as(staffA) })).rejects.toThrow()
+    // A dud: its supplies are gone, stock stays.
+    await voidUnit(payload, units[0]!.id, { reason: 'dud' })
+    expect((await get('supply-items', swab.id)).onHand).toBe(9)
+    // Built by mistake: its swabs go back to the lots they came from.
+    await voidUnit(payload, units[1]!.id, { reason: 'mistake', returnToStock: true })
+    expect((await get('supply-items', swab.id)).onHand).toBe(11)
+    const lot = async (n: string) => (await get('supply-lots', lots[n])).onHand
+    expect([await lot('S-A'), await lot('S-B')]).toEqual([1, 10])
+    expect(await get('assembled-units', units[1]!.id)).toMatchObject({ status: 'void', voidReason: 'mistake', returnedToStock: true })
+    await expect(voidUnit(payload, units[1]!.id, { reason: 'other' })).rejects.toThrow(/already void/)
+  })
+
+  it('builds over HTTP only for people who manage that site', async () => {
+    const { recipe } = await kit()
+    const endpoint = payload.config.endpoints.find((e) => e.path === '/kitting/build')!
+    const call = (user: Doc | null, body: Doc) => endpoint.handler({ payload, user: user && { ...user, collection: 'users' }, json: async () => body } as never) as Promise<Response>
+    const k = `H-${run()}`
+    expect((await call(null, { recipe: recipe.id, externalIds: [k] })).status).toBe(401)
+    expect((await call(staffB, { recipe: recipe.id, externalIds: [k] })).status).toBe(403)
+    expect((await call(viewerA, { recipe: recipe.id, externalIds: [k] })).status).toBe(403)
+    const bad = await call(staffA, { recipe: recipe.id, externalIds: ['a', 'b', 'c', 'd'] })
+    expect([bad.status, (await bad.json()).code]).toEqual([400, 'batchLimit'])
+    const ok = await call(staffA, { recipe: recipe.id, externalIds: [k] })
+    expect(ok.status).toBe(200)
+    expect((await ok.json()).units.map((u: Doc) => u.externalId)).toEqual([k])
   })
 })

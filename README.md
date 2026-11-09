@@ -4,7 +4,7 @@ Kitting for [Payload](https://payloadcms.com): anyone from a café to a genomics
 
 It's meant for people with no IT department. You set it up once and carefully, with every item and a recipe for everything you make, down to the gram or the microlitre. From then on it knows how much of everything you need.
 
-**Status: 0.1.0, not on npm yet. Level 1 is built; level 2 is partly built.** Most of what's described below is planned, and each item says so.
+**Status: 0.1.0, not on npm yet. Levels 1 and 2 are built; level 3 is planned.** Most of what's described below is planned, and each item says so.
 
 ## Two examples
 
@@ -24,7 +24,7 @@ The same few words cover both: an **item** is anything you keep in stock, a **re
 You switch on only what you need, and the simple case stays simple:
 
 1. **Supply tracker.** Items in any unit, suppliers, lots and use-by dates, a stock log, the waste allowance and low-stock email. Nothing else. *Built.*
-2. **Recipes and builder.** Recipes and `applyRecipe` are built. *Planned:* a builder in the admin where you scan or type each unit's external ID and its items are taken off automatically, recording the lots used; recipes that use other recipes.
+2. **Recipes and builder.** Recipes, including recipes that use other recipes, and a builder in the admin where you scan or type each unit's external ID: its supplies come off stock and it records the lots that went into it. *Built.*
 3. **Fulfilment.** *Planned:* ready units assigned to orders (natively with Payload's ecommerce plugin, or through Kitting's own API), a "build one" queue, a recommended ready-stock level learned from your sales, and box suggestions by cost, using real postage when a shipping plugin is installed.
 
 Today levels 1 and 2 are always on together; the switches come with the builder.
@@ -39,7 +39,7 @@ Today levels 1 and 2 are always on together; the switches come with the builder.
 
 Later, not yet: ordering from suppliers when something stays low for a few days (see [docs/roadmap.md](docs/roadmap.md)), and turning till sales into usage.
 
-**Testing so far:** 26 tests pass, 6 of them pure unit tests and the rest against a real MongoDB (in memory, single-node replica set) on Payload 3.92: movements, units and packs, the waste allowance and its suggestion, lots used first to expire first with expired ones written off, recipes, the refusal to go below zero, the low-stock email firing once, two senders racing for one alert, site isolation and access. The overview at `/admin/supplies` was checked in a local dev server of a real host app with made-up data: it renders, its headings and tables are in order, and its text and buttons measured 15:1 contrast or better in dark mode. It hasn't been tried by a person, with a keyboard or a screen reader.
+**Testing so far:** 31 tests pass, 6 of them pure unit tests and the rest against a real MongoDB (in memory, single-node replica set) on Payload 3.92: movements, units and packs, the waste allowance and its suggestion, lots used first to expire first with expired ones written off, nested recipes, the builder (lots per unit, refusals, voiding, the HTTP endpoint's access), recipes, the refusal to go below zero, the low-stock email firing once, two senders racing for one alert, site isolation and access. The overview at `/admin/supplies` was checked in a local dev server of a real host app with made-up data: it renders, its headings and tables are in order, and its text and buttons measured 15:1 contrast or better in dark mode. The builder page and the new overview sections haven't been opened in a browser yet, and nothing has been tried by a person, with a keyboard or a screen reader.
 
 ## What it does
 
@@ -47,7 +47,8 @@ Later, not yet: ordering from suppliers when something stays low for a few days 
 - **Suppliers**: name, order email, phone, website, usual delivery time, notes.
 - **Lots** (`supply-lots`): for items with lots tracked, one per delivery, with its number, use-by date and what's left. Made when stock is received.
 - **Stock movements** (`supply-movements`): the stock log. Received, used, wasted (spilled, spoiled, expired, defective, a dud) or adjusted (+ or −), with who, why, a reference and the lot. A movement can't be edited or deleted, even through the Local API: you fix a mistake with an adjustment. On hand is only ever changed by a movement, so it always equals the sum of the item's log, opening stock included.
-- **Recipes** (`supply-recipes`): what goes into one of something, as supplies × quantity. Your code calls `applyRecipe` when it makes something, and the plugin writes one `used` movement per supply, in one transaction.
+- **Recipes** (`supply-recipes`): what goes into one of something, as supplies × quantity in any unit that converts. A line can use another recipe: a house syrup that makes 1 litre, used 20 ml per drink, takes a fiftieth of the syrup's sugar and water each time. A recipe can't use itself, however deep. Your code calls `applyRecipe` when it makes something, and the plugin writes one `used` movement per supply and lot, in one transaction.
+- **The builder** at `/admin/supplies/build`: choose a recipe, then scan or type each unit's ID (a barcode scanner that types and presses Enter works). Building takes the supplies off stock and makes one **built unit** (`assembled-units`) per ID, each recording which lots went into it. It refuses an ID scanned twice, one already built on that site, a batch bigger than the recipe's "most to build at once", and not having enough. Units can't be made, changed or deleted by hand, only their notes. `voidUnit` takes one out of use: a dud keeps stock as it is, and "built by mistake" with `returnToStock` puts its supplies back into the lots they came from. The same is at `POST /api/kitting/build` and `/api/kitting/void` for people who may manage that recipe or unit.
 - **Going below zero** is refused by default. Nothing is written, and the error names every supply that's short and by how much. Set `negativeStock: 'warn'` to let it through and get the shortages back instead.
 - **Low-stock email**: when a supply drops below its level, one email goes to the addresses you set. No more about that supply until it's back at or above the level. If your site has email off, the alert is recorded as not sent, and it isn't sent later.
 - **Overview** at `/admin/supplies`: what's below level, grouped by supplier with their contact details and a suggested reorder (the reorder quantity, or enough to get back to the level if that's more), then every supply.
@@ -78,6 +79,17 @@ export default buildConfig({
 ```
 
 Then run `payload generate:importmap`, because the overview is an admin view.
+
+## Building units from your code
+
+```ts
+import { buildUnits } from '@captiveorigins/payload-plugin-kitting'
+
+const { units } = await buildUnits(payload, { key: 'sample-kit' }, ['ZX-1001', 'ZX-1002'], { scope: siteId, user: req.user })
+// units[0].lotsUsed: [{ item, lot, quantity }, …]
+```
+
+To create or link your own record for each unit in the same transaction, pass `units: { onBuild: async ({ unit, recipe, req }) => { … } }` to the plugin. Throw to refuse the build; nothing is kept.
 
 ## Using stock when you make something
 
@@ -115,7 +127,8 @@ With `scopeField`, a recipe key needs its site: `{ key, scope }`. `{ id }` works
 
 | Option | Default | |
 |---|---|---|
-| `slugs` | `supply-items`, `suppliers`, `supply-movements`, `supply-recipes`, `supply-lots` | |
+| `slugs` | `supply-items`, `suppliers`, `supply-movements`, `supply-recipes`, `supply-lots`, `assembled-units` | |
+| `units.onBuild` | none | Runs for each built unit inside the build's transaction |
 | `access.manage` | signed-in admin users | Add and edit supplies, suppliers and recipes, and record movements. May return a query |
 | `access.read` | same as `manage` | See them |
 | `scopeField` | none | The field that separates sites, such as `tenant`. Your tenant plugin adds it |

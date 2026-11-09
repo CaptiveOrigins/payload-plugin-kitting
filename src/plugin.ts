@@ -1,6 +1,7 @@
 import type { Access, CollectionConfig, Config, Plugin } from 'payload'
 
-import { itemsCollection, lotsCollection, movementsCollection, recipesCollection, suppliersCollection } from './collections.js'
+import { itemsCollection, lotsCollection, unitsCollection, movementsCollection, recipesCollection, suppliersCollection } from './collections.js'
+import { kittingEndpoints } from './endpoints.js'
 import type { ResolvedSupplies, KittingPluginOptions } from './types.js'
 
 const clampPercent = (n: unknown) => (typeof n === 'number' && Number.isFinite(n) ? Math.min(Math.max(n, 0), 100) : 0)
@@ -20,6 +21,8 @@ export const kittingPlugin =
       movements: options.slugs?.movements ?? 'supply-movements',
       recipes: options.slugs?.recipes ?? 'supply-recipes',
       lots: options.slugs?.lots ?? 'supply-lots',
+      units: options.slugs?.units ?? 'assembled-units',
+      onBuild: options.units?.onBuild,
       userSlug,
       read: options.access?.read ?? options.access?.manage ?? signedIn,
       manage: options.access?.manage ?? signedIn,
@@ -43,19 +46,25 @@ export const kittingPlugin =
       apply(movementsCollection(o), ov.movements),
       apply(recipesCollection(o), ov.recipes),
       apply(lotsCollection(o), ov.lots),
+      apply(unitsCollection(o), ov.units),
     ]
     const components = config.admin?.components ?? {}
     return {
       ...config,
       custom: { ...config.custom, kitting: o },
       collections: [...(config.collections ?? []).filter((c) => !added.some((a) => a.slug === c.slug)), ...added],
+      endpoints: [...(config.endpoints ?? []), ...kittingEndpoints],
       admin: o.adminView
         ? {
             ...config.admin,
             components: {
               ...components,
               afterNavLinks: [...(components.afterNavLinks ?? []), '@captiveorigins/payload-plugin-kitting/rsc#SuppliesNavLink'],
-              views: { ...components.views, supplies: { Component: '@captiveorigins/payload-plugin-kitting/rsc#SuppliesView', path: '/supplies' } },
+              views: {
+                ...components.views,
+                supplies: { Component: '@captiveorigins/payload-plugin-kitting/rsc#SuppliesView', path: '/supplies' },
+                suppliesBuild: { Component: '@captiveorigins/payload-plugin-kitting/rsc#BuildView', path: '/supplies/build' },
+              },
             },
           }
         : config.admin,
