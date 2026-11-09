@@ -739,3 +739,44 @@ describe('fulfilment: assign, queue, swap, release', () => {
     await expect(release(payload, { reference: 'B order' })).rejects.toThrow(/Say which tenant/)
   })
 })
+
+describe('ready-stock states and their emails', () => {
+  it('moves through build more, info, urgent and ok by the owner’s rules, one email per change', async () => {
+    const swab = await create('supply-items', { tenant: siteA.id, name: 'State swab', unit: 'each', openingStock: 10, lowStockLevel: 5 })
+    const recipe = await create('supply-recipes', { tenant: siteA.id, name: 'State kit', key: `st-${Math.random().toString(36).slice(2, 8)}`, lines: [{ item: swab.id, quantity: 2 }] })
+    const state = async () => (await get('supply-recipes', recipe.id)).stockState
+    const subjects = () => mail.filter((m) => m.subject.includes('State kit')).map((m) => m.subject)
+    // No number to keep: no state.
+    expect(await state()).toBeNull()
+    await payload.update({ collection: 'supply-recipes' as never, id: recipe.id, data: { readyStock: { baseline: 3 } } as never })
+    await sendPendingAlerts(payload)
+    expect(await state()).toBe('build-more') // 0 ready, enough supplies to build 5
+    expect(subjects()).toEqual(['State kit: build more'])
+    expect(mail.at(-1)!.to).toEqual([`stock-${String(siteA.id)}@example.com`])
+    const ids = ['ST1', 'ST2', 'ST3'].map((x) => `${x}-${Math.random().toString(36).slice(2, 6)}`)
+    await buildUnits(payload, { id: recipe.id }, ids, { scope: siteA.id }) // 4 swabs left, below 5
+    expect(await state()).toBe('info')
+    await assignUnits(payload, { id: recipe.id }, 2, { reference: 'State order', scope: siteA.id }) // 1 ready
+    expect(await state()).toBe('urgent')
+    await assignUnits(payload, { id: recipe.id }, 2, { reference: 'State order', scope: siteA.id }) // no change
+    expect(subjects()).toEqual(['State kit: build more', 'State kit: enough ready, but supplies are low', 'Urgent: State kit: urgent: few ready and supplies low'])
+    await create('supply-movements', { item: swab.id, kind: 'received', quantity: 100 }, as(staffA))
+    await sendPendingAlerts(payload)
+    expect(await state()).toBe('build-more')
+    await release(payload, { reference: 'State order', scope: siteA.id })
+    expect(await state()).toBe('ok')
+    expect(subjects()).toHaveLength(4) // back to OK sends nothing
+    // The state can't be set by hand.
+    await payload.update({ collection: 'supply-recipes' as never, id: recipe.id, data: { stockState: 'urgent' } as never, ...as(staffA) })
+    expect(await state()).toBe('ok')
+  })
+
+  it('records the email as not sent when email is off', async () => {
+    emailOn = false
+    const swab = await create('supply-items', { tenant: siteA.id, name: 'Quiet swab', unit: 'each', openingStock: 10 })
+    const recipe = await create('supply-recipes', { tenant: siteA.id, name: 'Quiet kit', key: `qk-${Math.random().toString(36).slice(2, 8)}`, lines: [{ item: swab.id, quantity: 1 }], readyStock: { baseline: 2 } })
+    await sendPendingAlerts(payload)
+    expect(await get('supply-recipes', recipe.id)).toMatchObject({ stockState: 'build-more', stockAlertStatus: 'not-sent', stockAlertNote: 'Email is off here.' })
+    expect(mail.filter((m) => m.subject.includes('Quiet kit'))).toHaveLength(0)
+  })
+})

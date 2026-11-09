@@ -33,6 +33,8 @@ export type AlertItem = {
   supplier?: { id: ID; name: string } | null
   /** The item's scope (for example its tenant id) when `scopeField` is set. */
   scope?: ID | null
+  /** `ready-stock` for a recipe's ready-stock email (then `onHand` is how many are ready). Default `supply`. */
+  kind?: 'supply' | 'ready-stock'
 }
 
 export type KittingPluginOptions = {

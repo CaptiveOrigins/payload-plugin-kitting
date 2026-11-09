@@ -1,7 +1,8 @@
 import type { CollectionSlug, Payload, PayloadRequest, Where } from 'payload'
 
 import { toBuiltUnit } from './build.js'
-import { asInternal, findRecipe, idOf, KittingError, num, suppliesOf, transaction } from './stock.js'
+import { refreshStockStates } from './readystock.js'
+import { asInternal, findRecipe, sendPendingAlerts, idOf, KittingError, num, suppliesOf, transaction } from './stock.js'
 import type { AssignContext, AssignResult, BuiltUnit, ID, RecipeRef, ResolvedSupplies } from './types.js'
 
 type Doc = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -31,7 +32,8 @@ export async function assignUnits(payload: Payload, recipe: RecipeRef, count: nu
   if (!Number.isInteger(count) || count < 1) throw new KittingError('count', 'The count is a whole number, 1 or more.')
   const reference = String(context.reference ?? '').trim()
   if (!reference) throw new KittingError('reference', 'Say which order this is for.')
-  return transaction(payload, context.req, async (req) => {
+  const joined = Boolean(context.req?.transactionID)
+  const result = await transaction(payload, context.req, async (req) => {
     const r = await findRecipe(payload, o, req, recipe, context.scope)
     const scope = o.scopeField ? idOf(r[o.scopeField]) : null
     const held = await heldBy(payload, o, req, r, scope, reference)
@@ -59,8 +61,11 @@ export async function assignUnits(payload: Payload, recipe: RecipeRef, count: nu
       }
     }
     const assigned = (await heldBy(payload, o, req, r, scope, reference)).units.map((u) => toBuiltUnit(o, u))
+    await refreshStockStates(payload, { req, scope })
     return { recipe: { id: r.id as ID, name: String(r.name) }, assigned, short, request }
   })
+  if (!joined) await sendPendingAlerts(payload).catch((error) => payload.logger.error({ err: error, msg: 'kitting: alerts not sent' }))
+  return result
 }
 
 /** What a reference already holds for a recipe: its assigned or shipped units, and its open request. */
@@ -101,7 +106,8 @@ export async function swapUnit(
   const o = suppliesOf(payload)
   const reference = String(args.reference ?? '').trim()
   if (!reference) throw new KittingError('reference', 'Say which order this is for.')
-  return transaction(payload, args.req, async (req) => {
+  const joined = Boolean(args.req?.transactionID)
+  const result = await transaction(payload, args.req, async (req) => {
     const unit = await findUnit(payload, o, req, args.take, args.scope)
     if (unit.status === 'assigned' && unit.assignedTo === reference) return { taken: toBuiltUnit(o, unit), released: null, fromRequest: null }
     if (unit.status !== 'ready') throw new KittingError('unitStatus', `${unit.externalId} is ${unit.status === 'assigned' ? `kept for ${unit.assignedTo}` : unit.status}, so it can’t go to ${reference}.`)
@@ -121,16 +127,20 @@ export async function swapUnit(
           req,
         }),
       )
+      await refreshStockStates(payload, { req, scope })
       return { taken, released: null, fromRequest: held.request.id }
     }
     const swapOut = [...held.units].reverse().find((u) => u.status === 'assigned')
     if (swapOut) {
       const released = toBuiltUnit(o, await setUnit(payload, o, req, swapOut.id, { status: 'ready', assignedTo: null, assignedAt: null }))
       const taken = toBuiltUnit(o, await setUnit(payload, o, req, unit.id, { status: 'assigned', assignedTo: reference, assignedAt: now }))
+      await refreshStockStates(payload, { req, scope })
       return { taken, released, fromRequest: null }
     }
     throw new KittingError('nothingReserved', `${reference} has no ${r.name} kept for it.`)
   })
+  if (!joined) await sendPendingAlerts(payload).catch((error) => payload.logger.error({ err: error, msg: 'kitting: alerts not sent' }))
+  return result
 }
 
 /**
@@ -146,11 +156,14 @@ export async function release(
   const o = suppliesOf(payload)
   const reference = String(args.reference ?? '').trim()
   if (!reference) throw new KittingError('reference', 'Say which order this is for.')
-  return transaction(payload, args.req, async (req) => {
+  const joined = Boolean(args.req?.transactionID)
+  const result = await transaction(payload, args.req, async (req) => {
     if (args.unit) {
       const unit = await findUnit(payload, o, req, args.unit, args.scope)
       if (unit.assignedTo !== reference || unit.status !== 'assigned') throw new KittingError('unitStatus', `${unit.externalId} isn’t kept for ${reference}.`)
-      return { released: [toBuiltUnit(o, await setUnit(payload, o, req, unit.id, { status: 'ready', assignedTo: null, assignedAt: null }))], cancelledRequests: [] }
+      const released = [toBuiltUnit(o, await setUnit(payload, o, req, unit.id, { status: 'ready', assignedTo: null, assignedAt: null }))]
+      await refreshStockStates(payload, { req, scope: o.scopeField ? idOf(unit[o.scopeField]) : null })
+      return { released, cancelledRequests: [] }
     }
     if (o.scopeField && (args.scope === undefined || args.scope === null) && !args.recipe) throw new KittingError('scope', `Say which ${o.scopeField} ${reference} belongs to.`)
     const r = args.recipe ? await findRecipe(payload, o, req, args.recipe, args.scope) : null
@@ -161,8 +174,11 @@ export async function release(
     for (const u of units) released.push(toBuiltUnit(o, await setUnit(payload, o, req, u.id, { status: 'ready', assignedTo: null, assignedAt: null })))
     const requests = (await payload.find({ collection: o.requests as CollectionSlug, where: { and: [...base, { reference: { equals: reference } }, { status: { equals: 'open' } }] }, ...list, req })).docs as Doc[]
     for (const q of requests) await asInternal(req, {}, () => payload.update({ collection: o.requests as CollectionSlug, id: q.id, data: { status: 'cancelled' } as never, ...sys, req }))
+    await refreshStockStates(payload, { req, scope })
     return { released, cancelledRequests: requests.map((q) => q.id as ID) }
   })
+  if (!joined) await sendPendingAlerts(payload).catch((error) => payload.logger.error({ err: error, msg: 'kitting: alerts not sent' }))
+  return result
 }
 
 /**

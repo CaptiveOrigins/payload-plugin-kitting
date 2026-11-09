@@ -2,6 +2,7 @@ import type { CollectionAfterChangeHook, CollectionAfterOperationHook, Collectio
 
 import { ALLOW_DELETE, INTERNAL, alertFields, applyMovementToItem, mayManage, asInternal, idOf, prepareMovement, round, sameID, sendPendingAlerts, KittingError } from './stock.js'
 import type { ResolvedSupplies } from './types.js'
+import { refreshStockStates } from './readystock.js'
 import { STOCK_METHODS } from './stocklevel.js'
 import { normalizeUnit } from './units.js'
 
@@ -10,6 +11,15 @@ const OPENING_LOT = 'kittingOpeningLot'
 type Doc = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
 
 const ALERT_FIELDS = ['belowLevelSince', 'alertStatus', 'alertAt', 'alertNote'] as const
+
+/** After a change made by hand, bring ready-stock states up to date in the same transaction. */
+const refreshAfter =
+  (o: ResolvedSupplies): CollectionAfterChangeHook =>
+  async ({ doc, req }) => {
+    if (req.context?.[INTERNAL]) return doc
+    await refreshStockStates(req.payload, { req, scope: o.scopeField ? idOf(doc[o.scopeField]) : null })
+    return doc
+  }
 const sys = { overrideAccess: true, depth: 0, joins: false } as const
 const never = () => false
 
@@ -94,7 +104,7 @@ export function itemsCollection(o: ResolvedSupplies): CollectionConfig {
       description: 'What goes into the things you make. On hand changes only through stock movements.',
     },
     access: { read: o.read, create: o.manage, update: o.manage, delete: o.manage },
-    hooks: { beforeChange: [beforeChange], afterChange: [afterChange], beforeDelete: [beforeDelete], afterOperation: [sendForTouched((r) => (Array.isArray(r.docs) ? r.docs : [r]))] },
+    hooks: { beforeChange: [beforeChange], afterChange: [afterChange, refreshAfter(o)], beforeDelete: [beforeDelete], afterOperation: [sendForTouched((r) => (Array.isArray(r.docs) ? r.docs : [r]))] },
     fields: [
       { name: 'name', type: 'text', required: true, label: 'Name' },
       {
@@ -258,7 +268,7 @@ export function movementsCollection(o: ResolvedSupplies): CollectionConfig {
     defaultSort: '-createdAt',
     // Append-only, whatever the host's access says. Trusted cleanup scripts pass `kittingAllowDelete`.
     access: { read: o.read, create: o.manage, update: never, delete: never },
-    hooks: { beforeChange: [beforeChange], afterChange: [afterChange], beforeDelete: [beforeDelete], afterOperation: [sendForTouched((r) => [r.item])] },
+    hooks: { beforeChange: [beforeChange], afterChange: [afterChange, refreshAfter(o)], beforeDelete: [beforeDelete], afterOperation: [sendForTouched((r) => [r.item])] },
     fields: [
       { name: 'item', type: 'relationship', relationTo: o.items as CollectionSlug, required: true, label: 'Supply' },
       {
@@ -404,7 +414,7 @@ export function recipesCollection(o: ResolvedSupplies): CollectionConfig {
       description: 'What goes into one of something you make. Making 50 uses 50 × each line.',
     },
     access: { read: o.read, create: o.manage, update: o.manage, delete: o.manage },
-    hooks: { beforeChange: [beforeChange] },
+    hooks: { beforeChange: [beforeChange], afterChange: [refreshAfter(o)] },
     fields: [
       { name: 'name', type: 'text', required: true, label: 'What it makes', admin: { description: 'For example: Gift box.' } },
       { name: 'key', type: 'text', required: true, index: true, label: 'Key', admin: { description: 'A short code the site’s software uses to find this recipe, like gift-box.' } },

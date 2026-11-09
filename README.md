@@ -39,7 +39,7 @@ Today levels 1 and 2 are always on together; the switches come with the builder.
 
 Later, not yet: ordering from suppliers when something stays low for a few days (see [docs/roadmap.md](docs/roadmap.md)), and turning till sales into usage.
 
-**Testing so far:** 53 tests pass (audited 2026-11-08, see [docs/test-audit.md](docs/test-audit.md)): 18 pure ones (units, lots, the shrinkage allowance, every stock method against known values, and the commerce and shipping contracts with made-up doubles), and 35 against a real MongoDB (in memory, single-node replica set) on Payload 3.92: movements, units and packs, the shrinkage allowance and its suggestion, lots used first to expire first with expired ones written off, nested recipes, the builder (lots per unit, refusals, voiding, the HTTP endpoint's access), the ready-stock recommendation, assigning, queueing, swapping and releasing units for orders, recipes, the refusal to go below zero, the low-stock email firing once, two senders racing for one alert, site isolation and access. The overview at `/admin/supplies` was checked in a local dev server of a real host app with made-up data: it renders, its headings and tables are in order, and its text and buttons measured 15:1 contrast or better in dark mode. The builder page and the new overview sections haven't been opened in a browser yet, and nothing has been tried by a person, with a keyboard or a screen reader.
+**Testing so far:** 55 tests pass (audited 2026-11-08, see [docs/test-audit.md](docs/test-audit.md)): 18 pure ones (units, lots, the shrinkage allowance, every stock method against known values, and the commerce and shipping contracts with made-up doubles), and 37 against a real MongoDB (in memory, single-node replica set) on Payload 3.92: movements, units and packs, the shrinkage allowance and its suggestion, lots used first to expire first with expired ones written off, nested recipes, the builder (lots per unit, refusals, voiding, the HTTP endpoint's access), the ready-stock recommendation, assigning, queueing, swapping and releasing units for orders, every ready-stock state and its one email, recipes, the refusal to go below zero, the low-stock email firing once, two senders racing for one alert, site isolation and access. The overview at `/admin/supplies` was checked in a local dev server of a real host app with made-up data: it renders, its headings and tables are in order, and its text and buttons measured 15:1 contrast or better in dark mode. The builder page and the new overview sections haven't been opened in a browser yet, and nothing has been tried by a person, with a keyboard or a screen reader.
 
 ## What it does
 
@@ -98,6 +98,17 @@ await shipUnits(payload, [unitId], { req })
 await release(payload, { reference: 'Order 1042', unit: { externalId: 'ZX-1001' }, scope: siteId, req })
 await release(payload, { reference: 'Order 1042', scope: siteId, req })
 ```
+
+**Ready-stock states.** Set "Keep this many ready" on a recipe and Kitting watches it, by these rules:
+
+| Ready units | Supplies | State |
+|---|---|---|
+| At or above the number | fine | OK |
+| At or above the number | low | Enough ready, supplies low (for your information) |
+| Below the number | enough to build them | Build more |
+| Below the number | low | Urgent |
+
+"Low" is either a supply in the recipe below its level, or not enough usable stock to build up to the number. You choose which on each recipe; the default is either. One email goes out on each change into a state that isn't OK, never twice, and nothing goes out when it's back to OK. Building, ordering, releasing, voiding, writing off and recording stock all update the state.
 
 Build requests (`build-requests`) list what's waiting, oldest first. A build gives its new units to them first, in order; pass `fillRequests: false` to `buildUnits` to keep a batch ready instead. Requests can't be made by hand, only cancelled.
 

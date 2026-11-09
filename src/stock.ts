@@ -1,5 +1,6 @@
 import { APIError, type CollectionSlug, type Payload, type PayloadRequest, type Where } from 'payload'
 
+import { refreshStockStates, sendStockAlerts } from './readystock.js'
 import { conversionFactor, normalizeUnit, unitsFor } from './units.js'
 import type { AlertItem, AlertStatus, ApplyRecipeContext, ApplyRecipeResult, ID, NegativeStock, RecipeRef, ResolvedSupplies, Shortage } from './types.js'
 
@@ -194,7 +195,7 @@ async function createLot(payload: Payload, o: ResolvedSupplies, req: Req, item: 
 }
 
 /** Usable stock of an item: unexpired lots, plus any stock from before lots were tracked. */
-function usable(item: Doc, lots: Doc[], now = new Date()) {
+export function usable(item: Doc, lots: Doc[], now = new Date()) {
   const fresh = lots.filter((l) => !isExpired(l.expiresOn, now) && (num(l.onHand) ?? 0) > 0)
   const inLots = round(lots.reduce((t, l) => t + Math.max(num(l.onHand) ?? 0, 0), 0))
   const unlotted = Math.max(round((num(item.onHand) ?? 0) - inLots), 0)
@@ -292,6 +293,7 @@ export async function applyRecipe(payload: Payload, recipe: RecipeRef, count: nu
       reference: context.reference ?? null,
       reason: context.reason ?? `Used by recipe "${r.name}" × ${count}`,
     })
+    await refreshStockStates(payload, { req, scope: o.scopeField ? idOf(r[o.scopeField]) : null })
     return { recipe: { id: r.id as ID, name: String(r.name) }, count, ...used }
   })
   // Our own transaction is committed: send the alert now. A caller's transaction isn't, so the
@@ -483,6 +485,7 @@ export async function writeOffExpired(payload: Payload, options: { now?: Date } 
             req,
           }),
         )
+        await refreshStockStates(payload, { req, scope: o.scopeField ? idOf(fresh[o.scopeField]) : null })
         written++
       })
     } catch (error) {
@@ -625,6 +628,8 @@ export async function sendPendingAlerts(payload: Payload, options: { req?: Req; 
     else if (status === 'failed') report.failed++
     else report.notSent++
   }
+  // Ready-stock emails are claimed the same way; only outside a caller's transaction.
+  if (!options.req) await sendStockAlerts(payload).catch((error) => payload.logger.error({ err: error, msg: 'kitting: ready-stock alerts not sent' }))
   return report
 }
 

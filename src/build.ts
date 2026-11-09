@@ -2,6 +2,7 @@ import type { CollectionSlug, Payload, PayloadRequest, Where } from 'payload'
 
 import { asInternal, findRecipe, idOf, KittingError, num, planRecipe, round, sameID, sendPendingAlerts, suppliesOf, transaction, useNeeds } from './stock.js'
 import { fillRequests } from './fulfil.js'
+import { refreshStockStates } from './readystock.js'
 import { compareMethods, dailyDemand, settingsFromRecipe, type Recommendation } from './stocklevel.js'
 import type { BuildContext, BuildResult, BuiltUnit, ID, LotUse, RecipeRef, ResolvedSupplies } from './types.js'
 
@@ -117,6 +118,7 @@ export async function buildUnits(payload: Payload, recipe: RecipeRef, externalId
       units.push(unit)
     }
     const queued = context.fillRequests === false ? [] : await fillRequests(payload, req, r, units)
+    await refreshStockStates(payload, { req, scope })
     return {
       recipe: { id: r.id as ID, name: String(r.name) },
       units,
@@ -170,6 +172,7 @@ export async function voidUnit(
         req,
       }),
     )) as Doc
+    await refreshStockStates(payload, { req, scope: o.scopeField ? idOf(unit[o.scopeField]) : null })
     return toBuiltUnit(o, doc)
   })
   if (!joined) await sendPendingAlerts(payload).catch(() => undefined)
