@@ -1,6 +1,7 @@
 import type { CollectionSlug, Payload, PayloadRequest, Where } from 'payload'
 
 import { asInternal, findRecipe, idOf, KittingError, num, planRecipe, round, sameID, sendPendingAlerts, suppliesOf, transaction, useNeeds } from './stock.js'
+import { compareMethods, dailyDemand, settingsFromRecipe, type Recommendation } from './stocklevel.js'
 import type { BuildContext, BuildResult, BuiltUnit, ID, LotUse, RecipeRef, ResolvedSupplies } from './types.js'
 
 type Doc = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -174,4 +175,29 @@ export async function mayManageDoc(req: PayloadRequest, o: ResolvedSupplies, col
   if (!access) return false
   const found = await req.payload.count({ collection: collection as CollectionSlug, where: { and: [{ id: { equals: id } }, access as Where] }, overrideAccess: true, req })
   return found.totalDocs > 0
+}
+
+/**
+ * The ready-stock recommendation for a recipe, every method side by side (the chosen one first).
+ * Demand is the units assigned per day over the recipe's history window, or the `sales` you pass
+ * (for example from your shop's orders). Ready is the number of units built and not yet assigned.
+ */
+export async function recommendReadyStock(
+  payload: Payload,
+  recipeID: ID,
+  options: { sales?: { at: string | Date; quantity?: number }[]; now?: Date; req?: Req } = {},
+): Promise<{ ready: number; recommendations: Recommendation[] }> {
+  const o = suppliesOf(payload)
+  const req = options.req ?? {}
+  const r = await findRecipe(payload, o, req, { id: recipeID })
+  const settings = settingsFromRecipe(r)
+  const now = options.now ?? new Date()
+  const since = new Date(now.getTime() - settings.windowDays * 86_400_000).toISOString()
+  const sales =
+    options.sales ??
+    ((await payload.find({ collection: o.units as CollectionSlug, where: { and: [{ recipe: { equals: r.id } }, { assignedAt: { greater_than_equal: since } }] }, ...list, req })).docs as Doc[]).map(
+      (u) => ({ at: String(u.assignedAt) }),
+    )
+  const ready = (await payload.count({ collection: o.units as CollectionSlug, where: { and: [{ recipe: { equals: r.id } }, { status: { equals: 'ready' } }] }, overrideAccess: true, req })).totalDocs
+  return { ready, recommendations: compareMethods(dailyDemand(sales, settings.windowDays, now), settings, ready) }
 }

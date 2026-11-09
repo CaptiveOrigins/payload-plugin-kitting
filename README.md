@@ -4,7 +4,7 @@ Kitting for [Payload](https://payloadcms.com): anyone from a café to a genomics
 
 It's meant for people with no IT department. You set it up once and carefully, with every item and a recipe for everything you make, down to the gram or the microlitre. From then on it knows how much of everything you need.
 
-**Status: 0.1.0, not on npm yet. Levels 1 and 2 are built; level 3 is planned.** Most of what's described below is planned, and each item says so.
+**Status: 0.1.0, not on npm yet. Levels 1 and 2 are built. Of level 3, the ready-stock methods and the commerce and shipping contracts are built; the rest is planned.** Most of what's described below is planned, and each item says so.
 
 ## Two examples
 
@@ -25,7 +25,7 @@ You switch on only what you need, and the simple case stays simple:
 
 1. **Supply tracker.** Items in any unit, suppliers, lots and use-by dates, a stock log, the waste allowance and low-stock email. Nothing else. *Built.*
 2. **Recipes and builder.** Recipes, including recipes that use other recipes, and a builder in the admin where you scan or type each unit's external ID: its supplies come off stock and it records the lots that went into it. *Built.*
-3. **Fulfilment.** *Planned:* ready units assigned to orders (natively with Payload's ecommerce plugin, or through Kitting's own API), a "build one" queue, a recommended ready-stock level learned from your sales, and box suggestions by cost, using real postage when a shipping plugin is installed.
+3. **Fulfilment.** *Built:* how many ready units to keep, by one of five methods (below), and the typed contracts for a shop and a shipping plugin. *Planned:* ready units assigned to orders (natively with Payload's ecommerce plugin, or through Kitting's own API), a "build one" queue, a recommended ready-stock level learned from your sales, and box suggestions by cost, using real postage when a shipping plugin is installed.
 
 Today levels 1 and 2 are always on together; the switches come with the builder.
 
@@ -39,7 +39,7 @@ Today levels 1 and 2 are always on together; the switches come with the builder.
 
 Later, not yet: ordering from suppliers when something stays low for a few days (see [docs/roadmap.md](docs/roadmap.md)), and turning till sales into usage.
 
-**Testing so far:** 31 tests pass, 6 of them pure unit tests and the rest against a real MongoDB (in memory, single-node replica set) on Payload 3.92: movements, units and packs, the waste allowance and its suggestion, lots used first to expire first with expired ones written off, nested recipes, the builder (lots per unit, refusals, voiding, the HTTP endpoint's access), recipes, the refusal to go below zero, the low-stock email firing once, two senders racing for one alert, site isolation and access. The overview at `/admin/supplies` was checked in a local dev server of a real host app with made-up data: it renders, its headings and tables are in order, and its text and buttons measured 15:1 contrast or better in dark mode. The builder page and the new overview sections haven't been opened in a browser yet, and nothing has been tried by a person, with a keyboard or a screen reader.
+**Testing so far:** 44 tests pass: 18 pure ones (units, lots, the waste allowance, every stock method against known values, and the commerce and shipping contracts with made-up doubles), and 26 against a real MongoDB (in memory, single-node replica set) on Payload 3.92: movements, units and packs, the waste allowance and its suggestion, lots used first to expire first with expired ones written off, nested recipes, the builder (lots per unit, refusals, voiding, the HTTP endpoint's access), the ready-stock recommendation, recipes, the refusal to go below zero, the low-stock email firing once, two senders racing for one alert, site isolation and access. The overview at `/admin/supplies` was checked in a local dev server of a real host app with made-up data: it renders, its headings and tables are in order, and its text and buttons measured 15:1 contrast or better in dark mode. The builder page and the new overview sections haven't been opened in a browser yet, and nothing has been tried by a person, with a keyboard or a screen reader.
 
 ## What it does
 
@@ -79,6 +79,20 @@ export default buildConfig({
 ```
 
 Then run `payload generate:importmap`, because the overview is an admin view.
+
+## How many to keep ready
+
+Each recipe has "Ready stock" settings, and `recommendReadyStock(payload, recipeId)` gives every method's answer side by side, the chosen one first, each with its reasoning in plain words: "About 1.4 a day over the last 90 days, a 5-day build and a daily check, 95% service → keep 14 ready (8.4 expected, plus 5.6 safety stock)." It never changes anything by itself: you decide.
+
+| Method | Works out | Suits |
+|---|---|---|
+| Safety stock (default) | Average demand × (days to build + days between checks), plus z × σ × √(the same days), with z from your service level (95% → 1.645) | Steady demand with day-to-day ups and downs |
+| Days of cover | Average demand × N days | A rule you already use, such as two weeks of sales |
+| Minimum and maximum | Build up to the maximum once ready stock falls to the minimum | Building in set batches, or very low or irregular sales |
+| Following the trend | Holt's smoothing: today's level and trend, projected over the build time, plus safety stock | Growing, shrinking or seasonal demand |
+| A fixed number | The number you set | New products, or when you know better than the history |
+
+Demand is weighted towards recent weeks (a day 30 days old counts half). Until there are 28 days since the first sale, every method falls back to the fixed number and says so. The target is capped at the recipe's "most to build at once". Demand comes from units assigned to orders, which arrives with fulfilment; until then, pass your own sales: `recommendReadyStock(payload, id, { sales: [{ at, quantity }] })`. *Planned:* showing the comparison in the admin.
 
 ## Building units from your code
 

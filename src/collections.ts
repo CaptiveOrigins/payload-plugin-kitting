@@ -2,6 +2,7 @@ import type { CollectionAfterChangeHook, CollectionAfterOperationHook, Collectio
 
 import { ALLOW_DELETE, INTERNAL, alertFields, applyMovementToItem, asInternal, idOf, prepareMovement, round, sameID, sendPendingAlerts, KittingError } from './stock.js'
 import type { ResolvedSupplies } from './types.js'
+import { STOCK_METHODS } from './stocklevel.js'
 import { normalizeUnit } from './units.js'
 
 const OPENING_LOT = 'kittingOpeningLot'
@@ -477,6 +478,45 @@ export function recipesCollection(o: ResolvedSupplies): CollectionConfig {
         max: 100,
         label: 'Waste allowance (%)',
         admin: { position: 'sidebar', description: 'For every supply in this recipe, for example a kit failure rate. Empty: each supply’s own.' },
+      },
+      {
+        name: 'readyStock',
+        type: 'group',
+        label: 'Ready stock',
+        admin: { description: 'For things you build ahead and keep ready, such as kits. How many to keep is worked out by the method you choose; the overview shows every method side by side.' },
+        fields: [
+          {
+            name: 'method',
+            type: 'select',
+            defaultValue: 'statistical',
+            label: 'How to decide how many to keep',
+            options: STOCK_METHODS.map((m) => ({ label: m.label, value: m.value })),
+            admin: { description: STOCK_METHODS.map((m) => `${m.label}: ${m.suits}`).join(' ') },
+          },
+          {
+            type: 'row',
+            fields: [
+              { name: 'manual', type: 'number', min: 0, label: 'Fixed number', admin: { width: '33%', description: 'Also used until there’s enough sales history.' } },
+              { name: 'leadTimeDays', type: 'number', min: 0, defaultValue: 5, label: 'Days to build', admin: { width: '33%', description: 'From deciding to build to ready.' } },
+              { name: 'reviewDays', type: 'number', min: 1, defaultValue: 1, label: 'Check every (days)', admin: { width: '33%' } },
+            ],
+          },
+          {
+            type: 'row',
+            fields: [
+              { name: 'serviceLevel', type: 'number', min: 50, max: 99.9, defaultValue: 95, label: 'Service level (%)', admin: { width: '33%', description: 'How often you want to have one ready when it’s needed.' } },
+              { name: 'coverDays', type: 'number', min: 1, defaultValue: 14, label: 'Days of cover', admin: { width: '33%', description: 'For “Days of cover”.' } },
+              { name: 'windowDays', type: 'number', min: 7, defaultValue: 90, label: 'Sales history (days)', admin: { width: '33%' } },
+            ],
+          },
+          {
+            type: 'row',
+            fields: [
+              { name: 'min', type: 'number', min: 0, label: 'Minimum', admin: { width: '50%', description: 'For “Minimum and maximum”: build when ready stock falls to this.' } },
+              { name: 'max', type: 'number', min: 0, label: 'Maximum', admin: { width: '50%', description: '…up to this.' } },
+            ],
+          },
+        ],
       },
       { name: 'notes', type: 'textarea', label: 'Notes' },
     ],

@@ -80,3 +80,14 @@ export type ShippingProvider = {
  * a box, Kitting falls back to its own cost rules for that recommendation and says so ("rates
  * unavailable from EasyPost; ranked by box cost and postage bands").
  */
+
+/** The cheapest rate for each box, by box id. A box with no rate is left out (fall back for it). */
+export function cheapestPerBox(result: RateResult, boxes: PackedBox[]): Map<string, ShippingRate> {
+  const out = new Map<string, ShippingRate>()
+  for (const box of boxes) {
+    const options = result.rates.filter((r) => r.boxId === box.id)
+    const best = options.sort((a, b) => a.amount - b.amount)[0]
+    if (best) out.set(box.id, best)
+  }
+  return out
+}

@@ -3,7 +3,7 @@ import { MongoMemoryReplSet } from 'mongodb-memory-server'
 import { buildConfig, getPayload, type Access, type CollectionConfig, type Field, type Payload } from 'payload'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
-import { applyRecipe, buildUnits, kittingPlugin, KittingError, voidUnit, sendPendingAlerts, stockReport, suggestWastePercent, writeOffExpired } from '../src/index.js'
+import { applyRecipe, buildUnits, recommendReadyStock, kittingPlugin, KittingError, voidUnit, sendPendingAlerts, stockReport, suggestWastePercent, writeOffExpired } from '../src/index.js'
 
 // Made-up data throughout: example.com addresses, invented supplies and sites.
 type Doc = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -556,5 +556,19 @@ describe('the builder', () => {
     const ok = await call(staffA, { recipe: recipe.id, externalIds: [k] })
     expect(ok.status).toBe(200)
     expect((await ok.json()).units.map((u: Doc) => u.externalId)).toEqual([k])
+  })
+
+  it('recommends ready stock from the recipe’s settings and what is ready', async () => {
+    const { recipe } = await kit()
+    await payload.update({ collection: 'supply-recipes' as never, id: recipe.id, data: { maxPerBatch: 50, readyStock: { method: 'statistical', manual: 5, leadTimeDays: 5, reviewDays: 2, serviceLevel: 95 } } as never })
+    await buildUnits(payload, { id: recipe.id }, [`RS-${run()}`, `RS-${run()}`, `RS-${run()}`], { scope: siteA.id })
+    const now = new Date('2026-11-08T12:00:00Z')
+    const sales = Array.from({ length: 60 }, (_, i) => [{ at: new Date(now.getTime() - i * 86_400_000) }, { at: new Date(now.getTime() - i * 86_400_000) }]).flat()
+    const { ready, recommendations } = await recommendReadyStock(payload, recipe.id, { sales, now })
+    expect(ready).toBe(3)
+    expect(recommendations[0]).toMatchObject({ method: 'statistical', target: 14, buildNow: 11, fallback: false })
+    // No sales yet: the fixed number.
+    const empty = await recommendReadyStock(payload, recipe.id, { sales: [], now })
+    expect(empty.recommendations[0]).toMatchObject({ target: 5, fallback: true, buildNow: 2 })
   })
 })

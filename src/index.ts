@@ -1,5 +1,18 @@
 export { kittingPlugin } from './plugin.js'
-export { buildUnits, cleanExternalIds, splitLots, voidUnit, type VoidReason } from './build.js'
+export { buildUnits, cleanExternalIds, recommendReadyStock, splitLots, voidUnit, type VoidReason } from './build.js'
+export {
+  compareMethods,
+  dailyDemand,
+  holt,
+  recommend,
+  settingsFromRecipe,
+  STOCK_METHODS,
+  weightedStats,
+  zFor,
+  type Recommendation,
+  type StockMethod,
+  type StockSettings,
+} from './stocklevel.js'
 export {
   ALLOW_DELETE,
   allocate,
@@ -46,3 +59,5 @@ export type {
   ShippingRate,
   WeightUnit,
 } from './contracts/shipping.js'
+export { cheapestPerBox } from './contracts/shipping.js'
+export { linesByRecipe, type Availability, type CommerceSource, type FulfilmentResult, type OrderLine, type PlacedOrder } from './contracts/commerce.js'
