@@ -40,3 +40,33 @@ Each audit maps what the plugin promises (README, docs/decisions.md) to the test
 - **Admin field conditions and descriptions:** these are framework rendering, so skipped as overkill.
 - **The email layout** (`defaultAlertEmail` HTML): the text is checked through the alert tests. The HTML is escaped by one small function, and the layout is cosmetic.
 - **Commerce and shipping with a real shop or carrier:** none is built yet. The contracts are tested with doubles, and integration tests come with level 3.
+
+## 2026-11-08, second audit (after level 3, the platform wiring and a browser check)
+
+60 tests: 20 pure, 39 against an in-memory replica set, and 1 with Payload's real ecommerce plugin (`test/ecommerce.test.ts`).
+
+### New promises and their tests
+
+| Promise | Tests |
+|---|---|
+| Assign ready units oldest first, queue the rest, idempotent per reference; builds fill requests first | fulfilment: assigns ready units… |
+| The scan at packing decides: fill a waiting place, else swap a held unit; refuse another order's or a held-nothing order | fulfilment: lets the scan at packing decide… |
+| Release one or all (requests cancelled), never shipped units; requests not made by hand | fulfilment: releases one unit… |
+| **Site isolation** for orders: another site can't reach units, recipes or references | fulfilment: keeps one site's orders away… |
+| Ready-stock states by the owner's rules, one email per change, none back to OK, not sent when email is off, not settable by hand | ready-stock states (2) |
+| Box suggestions: packings within weight limits, postage bands, ranking, carrier rates, carrier failure falls back and says so, other sites' boxes never offered | packing (pure); box suggestions |
+| Ecommerce: availability follows ready units, orders fill or queue once, cancellation releases, skipped orders untouched | with Payload's ecommerce plugin |
+| **Access**: accepting a number to keep is for people who manage that recipe, whole numbers only | accepting a suggested number to keep |
+| A host collection is never replaced by one of Kitting's | plugin set-up |
+
+### Found and fixed
+
+- **The builder page showed the overview.** `/admin/supplies` matched `/admin/supplies/build`. Only a browser check could catch this; the views are now exact.
+- **Kitting replaced a host collection with the same slug.** On the platform, that was the Kits area's own `box-types`. It now refuses at startup, with a test.
+- **Startup failed without `scopeField`.** The unique ID index clashed with the field index. The ecommerce test, which has no sites, caught it.
+
+### Skipped, and why
+
+- **Two packers scanning the same unit at the same moment.** Both write the same unit document, so MongoDB aborts one with a write conflict; the Kits side retries once, then asks to try again. A reliable race test would be slow and flaky.
+- **Screen reader.** That's the owner's test T14. The keyboard-only flow was checked in a browser.
+- **Payments in the ecommerce test.** Kitting only reads orders, so payments are out of scope.
