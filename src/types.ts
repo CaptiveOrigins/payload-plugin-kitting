@@ -52,6 +52,12 @@ export type KittingPluginOptions = {
    */
   shipping?: { provider?: ShippingProvider; currency?: string }
   /**
+   * Where box suggestions get their boxes. Default: Kitting's own box collection. Pass `source` to use
+   * boxes your app already keeps (for example a packing list of its own): Kitting then adds no box
+   * collection, and calls `source` for the boxes a recipe can go in. Weights in grams, sizes in cm or in.
+   */
+  boxes?: { source?: BoxSource }
+  /**
    * Native integration with Payload's ecommerce plugin (level 3), off unless `enabled`. Put Kitting after
    * the ecommerce plugin in `plugins`. Products and variants get a "Built from recipe" field; their
    * "Ready to send" (and `inventory`, when the shop counts inventory) follow the ready units. A new
@@ -144,6 +150,7 @@ export type ResolvedSupplies = {
   postage: string
   onBuild?: NonNullable<KittingPluginOptions['units']>['onBuild']
   shippingProvider?: ShippingProvider
+  boxSource?: BoxSource
   currency: string
   ecommerce: { enabled: boolean; products: string; variants: string; orders: string; reference: (order: Record<string, unknown>) => string; skipOrder?: (order: Record<string, unknown>) => boolean }
   userSlug: string
@@ -244,3 +251,20 @@ export type AssignResult = {
   short: number
   request: { id: ID; count: number } | null
 }
+
+/** A box from the host's own list, for box suggestions. */
+export type SourceBox = {
+  id: ID
+  name: string
+  /** How many of the recipe fit. */
+  capacity: number
+  /** Cost of one box. Unknown: 0, so packings are ranked by postage and box count. */
+  cost?: number
+  /** Grams. */
+  emptyWeight?: number
+  /** Grams; caps the capacity with the recipe's packed weight. */
+  maxWeight?: number | null
+  dimensions?: { length: number; width: number; height: number; unit: 'cm' | 'in' } | null
+}
+
+export type BoxSource = (args: { payload: Payload; req: Partial<PayloadRequest>; recipe: { id: ID; key: string; name: string }; scope: ID | null }) => Promise<SourceBox[]>

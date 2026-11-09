@@ -76,20 +76,34 @@ export async function recommendBoxes(
   const scoped: Where[] = o.scopeField ? [{ [o.scopeField]: { equals: scope } }] : []
   const unitWeight = num(r.unitWeight)
   const notes: string[] = []
-  const boxDocs = (await payload.find({ collection: o.boxes as CollectionSlug, where: { and: [{ active: { not_equals: false } }, ...scoped] }, ...list, req })).docs as Doc[]
   const boxes: BoxOption[] = []
-  for (const b of boxDocs) {
-    const fit = ((b.fits ?? []) as Doc[]).find((f) => sameID(f.recipe, r.id))
-    if (!fit) continue
-    let capacity = num(fit.units) ?? 0
-    const empty = num(b.emptyWeight) ?? 0
-    const max = num(b.maxWeight)
-    if (max !== null && unitWeight) capacity = Math.min(capacity, Math.floor((max - empty) / unitWeight))
-    if (capacity < 1) continue
-    const [l, w, h] = [num(b.outsideLength), num(b.outsideWidth), num(b.outsideHeight)]
-    boxes.push({ id: b.id, name: String(b.name), capacity, cost: num(b.cost) ?? 0, emptyWeight: empty, dimensions: l && w && h ? { length: l, width: w, height: h, unit: (b.outsideUnit ?? 'cm') as LengthUnit } : null })
+  const fitBox = (b: { id: ID; name: string; capacity: number; cost?: number; emptyWeight?: number; maxWeight?: number | null; dimensions?: BoxOption['dimensions'] }) => {
+    let capacity = b.capacity
+    const empty = b.emptyWeight ?? 0
+    if (b.maxWeight != null && unitWeight) capacity = Math.min(capacity, Math.floor((b.maxWeight - empty) / unitWeight))
+    if (capacity >= 1) boxes.push({ id: b.id, name: b.name, capacity, cost: b.cost ?? 0, emptyWeight: empty, dimensions: b.dimensions ?? null })
   }
-  if (!boxes.length) return { packings: [], notes: [`No box in use says how many "${r.name}" fit. Add it under "What fits" on a box.`], currency: o.currency }
+  if (o.boxSource) {
+    for (const b of await o.boxSource({ payload, req, recipe: { id: r.id, key: String(r.key), name: String(r.name) }, scope })) fitBox(b)
+  } else {
+    const boxDocs = (await payload.find({ collection: o.boxes as CollectionSlug, where: { and: [{ active: { not_equals: false } }, ...scoped] }, ...list, req })).docs as Doc[]
+    for (const b of boxDocs) {
+      const fit = ((b.fits ?? []) as Doc[]).find((f) => sameID(f.recipe, r.id))
+      if (!fit) continue
+      const [l, w, h] = [num(b.outsideLength), num(b.outsideWidth), num(b.outsideHeight)]
+      fitBox({
+        id: b.id,
+        name: String(b.name),
+        capacity: num(fit.units) ?? 0,
+        cost: num(b.cost) ?? 0,
+        emptyWeight: num(b.emptyWeight) ?? 0,
+        maxWeight: num(b.maxWeight),
+        dimensions: l && w && h ? { length: l, width: w, height: h, unit: (b.outsideUnit ?? 'cm') as LengthUnit } : null,
+      })
+    }
+  }
+  if (!boxes.length)
+    return { packings: [], notes: [o.boxSource ? `No box in your list takes "${r.name}".` : `No box in use says how many "${r.name}" fit. Add it under "What fits" on a box.`], currency: o.currency }
   if (!unitWeight) notes.push(`"${r.name}" has no packed weight, so postage can’t be worked out. Ranked by box cost.`)
   const rates = ((await payload.find({ collection: o.postage as CollectionSlug, where: { and: scoped }, ...list, req })).docs as Doc[]).map((d) => ({ upToGrams: num(d.upToGrams) ?? 0, cost: num(d.cost) ?? 0 }))
 

@@ -28,6 +28,7 @@ export const kittingPlugin =
       postage: options.slugs?.postage ?? 'postage-rates',
       onBuild: options.units?.onBuild,
       shippingProvider: options.shipping?.provider,
+      boxSource: options.boxes?.source,
       currency: options.shipping?.currency ?? 'USD',
       ecommerce: {
         enabled: options.ecommerce?.enabled ?? false,
@@ -62,7 +63,7 @@ export const kittingPlugin =
       apply(lotsCollection(o), ov.lots),
       apply(unitsCollection(o), ov.units),
       apply(requestsCollection(o), ov.requests),
-      apply(boxesCollection(o), ov.boxes),
+      ...(o.boxSource ? [] : [apply(boxesCollection(o), ov.boxes)]),
       apply(postageCollection(o), ov.postage),
     ]
     // Never replace a host's own collection: a clash stops startup and says how to fix it.

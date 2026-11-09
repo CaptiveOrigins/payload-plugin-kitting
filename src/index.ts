@@ -40,6 +40,8 @@ export type {
   AlertStatus,
   ApplyRecipeContext,
   ApplyRecipeResult,
+  BoxSource,
+  SourceBox,
   AssignContext,
   AssignResult,
   BuildContext,
