@@ -12,3 +12,13 @@ export type {
   Shortage,
   KittingPluginOptions,
 } from './types.js'
+export type {
+  LengthUnit,
+  PackedBox,
+  RateRequest,
+  RateResult,
+  ShippingAddress,
+  ShippingProvider,
+  ShippingRate,
+  WeightUnit,
+} from './contracts/shipping.js'

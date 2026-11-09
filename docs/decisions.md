@@ -54,3 +54,24 @@ In the owner's words: "over time, it should recommend how many kits to keep in s
 - The target is capped at the maximum batch. The recommendation and its reasoning show next to the manual baseline, for example "about 1.4 a day, a 5-day build, 95% service → keep 14 ready".
 - An admin accepts it. It never changes the baseline silently.
 - Everything is configurable and documented. Unit tests check the maths against known values.
+
+## 2026-11-08 (owner): native commerce and shipping
+
+- **Commerce.** Kitting integrates natively with Payload's official `@payloadcms/plugin-ecommerce`. A product, or a variant, can be backed by a kit recipe. Its ready-kit stock shows as the product's availability. An order placed through ecommerce triggers fulfilment: a ready kit is assigned, or a build is queued. Without ecommerce, the same works through Kitting's own API, so Kitting stays usable on its own.
+- **Shipping.** A sibling plugin, `payload-plugin-shipping`, is coming: carrier adapters (EasyPost first), rates, labels, tracking and returns.
+  - Kitting's box recommendations hand off to it. Each packed box's dimensions and weight go in, and rates come back to refine the "best by cost" choice.
+  - The interface is a small typed contract in `src/contracts/shipping.ts` (crossing `kitting-shipping`), and either plugin works without the other.
+  - With a shipping provider, Kitting uses real rates. Without one, or if the provider fails, it uses its own cost rules and says so.
+  - Kitting only asks for rates. Labels, tracking and returns belong to the shipping plugin.
+
+## 2026-11-08 (owner): recommended stock, several methods with one default
+
+This extends the "learned over time" decision above. Businesses approach this differently, so the method is chosen per recipe or product:
+
+- **Statistical safety stock** (default): demand over lead time plus review period, plus z·σ·√(LT+R), with a configurable service level.
+- **Simple multiplier:** average daily sales × N days of cover.
+- **Min/max:** build when ready stock falls to a minimum, up to a maximum.
+- **Trend-aware:** an exponentially weighted average, for growing or seasonal demand.
+- **Manual:** a fixed number. This is also the fallback when there's too little history.
+
+Each method shows its result with a plain-language explanation. The admin can compare the methods side by side before choosing one. The README says when each one suits a business. Unit tests check each method against known values.
