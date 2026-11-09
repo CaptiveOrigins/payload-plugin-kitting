@@ -3,7 +3,7 @@ import { MongoMemoryReplSet } from 'mongodb-memory-server'
 import { buildConfig, getPayload, type Access, type CollectionConfig, type Field, type Payload } from 'payload'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
-import { applyRecipe, sendPendingAlerts, stockReport, suppliesPlugin, SuppliesError } from '../src/index.js'
+import { applyRecipe, sendPendingAlerts, stockReport, kittingPlugin, KittingError } from '../src/index.js'
 
 // Made-up data throughout: example.com addresses, invented supplies and sites.
 type Doc = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -52,7 +52,7 @@ beforeAll(async () => {
       ],
       admin: { user: 'users' },
       plugins: [
-        suppliesPlugin({
+        kittingPlugin({
           scopeField: 'tenant',
           access: { manage: siteAccess(['staff']), read: siteAccess(['staff', 'viewer']) },
           alerts: {
@@ -170,7 +170,7 @@ describe('recipes', () => {
   it('refuses when anything would go negative, naming every shortage, and writes nothing', async () => {
     const { swab, tube, key } = await setup(siteA, { swab: 10, tube: 3 })
     const error = await applyRecipe(payload, { key }, 5, { scope: siteA.id }).catch((e) => e)
-    expect(error).toBeInstanceOf(SuppliesError)
+    expect(error).toBeInstanceOf(KittingError)
     expect(error.code).toBe('notEnoughStock')
     expect(error.shortages.map((s: Doc) => [s.name, s.onHand, s.needed])).toEqual([['Tube', 3, 5]])
     expect(error.message).toMatch(/Tube has 3 each, needs 5 each/)

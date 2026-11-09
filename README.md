@@ -1,8 +1,20 @@
-# payload-plugin-supplies
+# payload-plugin-kitting
 
-Supplies for [Payload](https://payloadcms.com): track the supplies that go into the things you make or sell.
+Kitting for [Payload](https://payloadcms.com): track supplies, and optionally build multi-part products (kits) from them. Used plainly, it's a supply tracker. Switch on more and it builds kits, keeps a ready stock and helps you pack orders.
 
-**Status: 0.1.0, not on npm yet.** 16 tests pass against a real MongoDB (in memory, single-node replica set) on Payload 3.92: movements, recipes, the refusal to go below zero, the low-stock email firing once, two senders racing for one alert, site isolation and access. The overview at `/admin/supplies` was checked in a local dev server of a real host app with made-up data: it renders, its headings and tables are in order, and its text and buttons measured 15:1 contrast or better in dark mode. It hasn't been tried by a person, with a keyboard or a screen reader.
+**Status: 0.1.0, not on npm yet. Only level 1 and part of level 2 exist so far** (see Levels).
+
+## Levels
+
+You switch on only what you need:
+
+1. **Supply tracker.** Supplies, suppliers, a stock log and low-stock email. Nothing else. *Built.*
+2. **Recipes and kit builder.** What goes into one kit. Recipes and `applyRecipe` are built. *Planned:* a builder in the admin where you scan or type each kit's ID, and its supplies are taken off automatically.
+3. **Fulfilment.** *Planned:* assigning ready kits to orders, a "build one" queue, a ready-stock target with a recommendation learned from your sales, and box suggestions by cost.
+
+Today levels 1 and 2 are always on together; the switches come with the builder.
+
+**Testing so far:** 16 tests pass against a real MongoDB (in memory, single-node replica set) on Payload 3.92: movements, recipes, the refusal to go below zero, the low-stock email firing once, two senders racing for one alert, site isolation and access. The overview at `/admin/supplies` was checked in a local dev server of a real host app with made-up data: it renders, its headings and tables are in order, and its text and buttons measured 15:1 contrast or better in dark mode. It hasn't been tried by a person, with a keyboard or a screen reader.
 
 ## What it does
 
@@ -20,15 +32,15 @@ It doesn't do purchase orders, costs or prices, or barcode scanning.
 ## Install
 
 ```bash
-npm install @captiveorigins/payload-plugin-supplies
+npm install @captiveorigins/payload-plugin-kitting
 ```
 
 ```ts
-import { suppliesPlugin } from '@captiveorigins/payload-plugin-supplies'
+import { kittingPlugin } from '@captiveorigins/payload-plugin-kitting'
 
 export default buildConfig({
   plugins: [
-    suppliesPlugin({
+    kittingPlugin({
       access: {
         manage: ({ req }) => req.user?.role === 'admin',
         read: ({ req }) => Boolean(req.user),
@@ -44,7 +56,7 @@ Then run `payload generate:importmap`, because the overview is an admin view.
 ## Using stock when you make something
 
 ```ts
-import { applyRecipe, SuppliesError } from '@captiveorigins/payload-plugin-supplies'
+import { applyRecipe, KittingError } from '@captiveorigins/payload-plugin-kitting'
 
 try {
   const { movements } = await applyRecipe(payload, { key: 'gift-box' }, 50, {
@@ -52,7 +64,7 @@ try {
     user: req.user,
   })
 } catch (error) {
-  if (error instanceof SuppliesError && error.code === 'notEnoughStock') {
+  if (error instanceof KittingError && error.code === 'notEnoughStock') {
     // error.shortages: [{ name, unit, onHand, needed, short }]
   }
   throw error
@@ -90,7 +102,7 @@ With `scopeField`, a recipe key needs its site: `{ key, scope }`. `{ id }` works
 | `adminView` | `true` | The overview at `/admin/supplies` and its nav link |
 | `adminGroup` | `Supplies` | Sidebar group |
 
-Movements can't be edited or deleted whatever `access` says. A trusted cleanup script, such as one that removes a whole site, can delete them by passing `context: { suppliesAllowDelete: true }`. The same flag lets it delete a supply that has history.
+Movements can't be edited or deleted whatever `access` says. A trusted cleanup script, such as one that removes a whole site, can delete them by passing `context: { kittingAllowDelete: true }`. The same flag lets it delete a supply that has history.
 
 ## Limits
 

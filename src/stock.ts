@@ -6,18 +6,18 @@ type Doc = Record<string, any> // eslint-disable-line @typescript-eslint/no-expl
 type Req = Partial<PayloadRequest>
 
 /** Request-context key for writes the plugin makes itself. Hosts never set it. */
-export const INTERNAL = 'suppliesInternal'
+export const INTERNAL = 'kittingInternal'
 /**
  * Request-context key that lets a trusted script delete movements (for example when a whole site
  * or a sandbox is removed). Nothing else can delete or edit a movement.
  */
-export const ALLOW_DELETE = 'suppliesAllowDelete'
+export const ALLOW_DELETE = 'kittingAllowDelete'
 
 export type Internal = { by?: ID | null; negativeStock?: NegativeStock; opening?: boolean; recipe?: ID; count?: number }
 
 export const suppliesOf = (payload: Payload): ResolvedSupplies => {
-  const o = payload.config.custom?.supplies as ResolvedSupplies | undefined
-  if (!o) throw new Error('payload-plugin-supplies is not installed in this Payload config.')
+  const o = payload.config.custom?.kitting as ResolvedSupplies | undefined
+  if (!o) throw new Error('payload-plugin-kitting is not installed in this Payload config.')
   return o
 }
 
@@ -49,7 +49,7 @@ export function alertFields(prev: Doc, onHand: number, level: unknown, now = new
   return {}
 }
 
-export class SuppliesError extends APIError<{ code: string; shortages?: Shortage[] }> {
+export class KittingError extends APIError<{ code: string; shortages?: Shortage[] }> {
   code: string
   shortages?: Shortage[]
   constructor(code: string, message: string, shortages?: Shortage[]) {
@@ -96,16 +96,16 @@ const plural = (n: number, unit: string) => `${n} ${unit}`
 
 async function findRecipe(payload: Payload, o: ResolvedSupplies, req: Req, ref: RecipeRef | Doc, scope?: ID): Promise<Doc> {
   if ('key' in ref && typeof ref.key === 'string' && !('id' in ref)) {
-    if (o.scopeField && (scope === undefined || scope === null)) throw new SuppliesError('scope', `Say which ${o.scopeField} the recipe "${ref.key}" belongs to.`)
+    if (o.scopeField && (scope === undefined || scope === null)) throw new KittingError('scope', `Say which ${o.scopeField} the recipe "${ref.key}" belongs to.`)
     const where: Where = o.scopeField ? { and: [{ key: { equals: ref.key } }, { [o.scopeField]: { equals: scope } }] } : { key: { equals: ref.key } }
     const found = (await payload.find({ collection: o.recipes as CollectionSlug, where, limit: 1, ...list, req })).docs[0] as Doc | undefined
-    if (!found) throw new SuppliesError('recipeNotFound', `No recipe with the key "${ref.key}".`)
+    if (!found) throw new KittingError('recipeNotFound', `No recipe with the key "${ref.key}".`)
     return found
   }
   const id = idOf(ref)
   const found = id === null ? null : ((await payload.findByID({ collection: o.recipes as CollectionSlug, id, ...sys, joins: false, disableErrors: true, req })) as Doc | null)
-  if (!found) throw new SuppliesError('recipeNotFound', 'That recipe doesn’t exist.')
-  if (o.scopeField && scope !== undefined && scope !== null && !sameID(found[o.scopeField], scope)) throw new SuppliesError('scope', 'That recipe belongs somewhere else.')
+  if (!found) throw new KittingError('recipeNotFound', 'That recipe doesn’t exist.')
+  if (o.scopeField && scope !== undefined && scope !== null && !sameID(found[o.scopeField], scope)) throw new KittingError('scope', 'That recipe belongs somewhere else.')
   return found
 }
 
@@ -116,12 +116,12 @@ async function findRecipe(payload: Payload, o: ResolvedSupplies, req: Req, ref: 
  */
 export async function applyRecipe(payload: Payload, recipe: RecipeRef, count: number, context: ApplyRecipeContext = {}): Promise<ApplyRecipeResult> {
   const o = suppliesOf(payload)
-  if (!Number.isInteger(count) || count < 1) throw new SuppliesError('count', 'The count is a whole number, 1 or more.')
+  if (!Number.isInteger(count) || count < 1) throw new KittingError('count', 'The count is a whole number, 1 or more.')
   const policy = context.negativeStock ?? o.negativeStock
   const joined = Boolean(context.req?.transactionID)
   const result = await transaction(payload, context.req, async (req) => {
     const r = await findRecipe(payload, o, req, recipe, context.scope)
-    if (r.active === false) throw new SuppliesError('recipeInactive', `The recipe "${r.name}" is switched off.`)
+    if (r.active === false) throw new KittingError('recipeInactive', `The recipe "${r.name}" is switched off.`)
     const totals = new Map<string, { id: ID; quantity: number }>()
     for (const line of (r.lines ?? []) as Doc[]) {
       const id = idOf(line.item)
@@ -130,13 +130,13 @@ export async function applyRecipe(payload: Payload, recipe: RecipeRef, count: nu
       const prev = totals.get(String(id))
       totals.set(String(id), { id, quantity: round((prev?.quantity ?? 0) + quantity * count) })
     }
-    if (!totals.size) throw new SuppliesError('recipeEmpty', `The recipe "${r.name}" has no supplies in it.`)
+    if (!totals.size) throw new KittingError('recipeEmpty', `The recipe "${r.name}" has no supplies in it.`)
 
     const items: Doc[] = []
     for (const { id } of totals.values()) {
       const item = (await payload.findByID({ collection: o.items as CollectionSlug, id, ...sys, joins: false, disableErrors: true, req })) as Doc | null
-      if (!item) throw new SuppliesError('itemNotFound', `A supply in "${r.name}" no longer exists. Edit the recipe.`)
-      if (o.scopeField && !sameID(item[o.scopeField], r[o.scopeField])) throw new SuppliesError('scope', `"${nameOf(item)}" belongs somewhere else than the recipe "${r.name}".`)
+      if (!item) throw new KittingError('itemNotFound', `A supply in "${r.name}" no longer exists. Edit the recipe.`)
+      if (o.scopeField && !sameID(item[o.scopeField], r[o.scopeField])) throw new KittingError('scope', `"${nameOf(item)}" belongs somewhere else than the recipe "${r.name}".`)
       items.push(item)
     }
     const shortages: Shortage[] = items.flatMap((item) => {
@@ -145,7 +145,7 @@ export async function applyRecipe(payload: Payload, recipe: RecipeRef, count: nu
       return onHand - needed < 0 ? [{ item: item.id as ID, name: nameOf(item), unit: unitOf(item), onHand, needed, short: round(needed - onHand) }] : []
     })
     if (shortages.length && policy === 'refuse')
-      throw new SuppliesError(
+      throw new KittingError(
         'notEnoughStock',
         `Not enough to make ${count} with "${r.name}": ` + shortages.map((s) => `${s.name} has ${plural(s.onHand, s.unit)}, needs ${plural(s.needed, s.unit)}`).join('; ') + '.',
         shortages,
@@ -169,7 +169,7 @@ export async function applyRecipe(payload: Payload, recipe: RecipeRef, count: nu
   })
   // Our own transaction is committed: send the alert now. A caller's transaction isn't, so the
   // alert stays pending until they call sendPendingAlerts, or the next save sends it.
-  if (!joined) await sendPendingAlerts(payload).catch((error) => payload.logger.error({ err: error, msg: 'supplies: low-stock alerts not sent' }))
+  if (!joined) await sendPendingAlerts(payload).catch((error) => payload.logger.error({ err: error, msg: 'kitting: low-stock alerts not sent' }))
   return result
 }
 
@@ -188,26 +188,26 @@ export async function prepareMovement(req: PayloadRequest, data: Doc): Promise<D
   const o = suppliesOf(payload)
   const internal = req.context?.[INTERNAL] as Internal | undefined
   const item = (await payload.findByID({ collection: o.items as CollectionSlug, id: idOf(data.item)!, ...sys, joins: false, disableErrors: true, req })) as Doc | null
-  if (!item) throw new SuppliesError('itemNotFound', 'Choose a supply.')
+  if (!item) throw new KittingError('itemNotFound', 'Choose a supply.')
   // A movement takes its owner from the item, so the person must be able to manage that item.
-  if (!internal && req.user && !(await mayManage(req, o, item.id))) throw new SuppliesError('forbidden', 'You can’t record stock for that supply.')
+  if (!internal && req.user && !(await mayManage(req, o, item.id))) throw new KittingError('forbidden', 'You can’t record stock for that supply.')
   const onHand = num(item.onHand) ?? 0
   const quantity = num(data.quantity)
   let change: number
   if (internal?.opening) {
     change = onHand
   } else if (data.kind === 'received' || data.kind === 'used') {
-    if (quantity === null || quantity <= 0) throw new SuppliesError('quantity', 'The quantity is more than zero.')
+    if (quantity === null || quantity <= 0) throw new KittingError('quantity', 'The quantity is more than zero.')
     change = data.kind === 'received' ? quantity : -quantity
   } else if (data.kind === 'adjusted') {
-    if (quantity === null || quantity === 0) throw new SuppliesError('quantity', 'An adjustment adds (+) or takes away (−) something: it can’t be zero.')
+    if (quantity === null || quantity === 0) throw new KittingError('quantity', 'An adjustment adds (+) or takes away (−) something: it can’t be zero.')
     change = quantity
-  } else throw new SuppliesError('kind', 'Choose received, used or adjusted.')
+  } else throw new KittingError('kind', 'Choose received, used or adjusted.')
   change = round(change)
   const after = internal?.opening ? onHand : round(onHand + change)
   const policy = internal?.negativeStock ?? o.negativeStock
   if (after < 0 && policy === 'refuse')
-    throw new SuppliesError('notEnoughStock', `Not enough ${nameOf(item)}: ${plural(onHand, unitOf(item))} on hand, this would leave ${plural(after, unitOf(item))}.`, [
+    throw new KittingError('notEnoughStock', `Not enough ${nameOf(item)}: ${plural(onHand, unitOf(item))} on hand, this would leave ${plural(after, unitOf(item))}.`, [
       { item: item.id, name: nameOf(item), unit: unitOf(item), onHand, needed: -change, short: round(-after) },
     ])
   const out: Doc = { ...data, change, onHandAfter: after, by: internal ? (internal.by ?? null) : req.user && req.user.collection === o.userSlug ? req.user.id : null }
@@ -282,7 +282,7 @@ async function deliver(payload: Payload, o: ResolvedSupplies, item: Doc, req?: R
     else await payload.sendEmail({ to, subject: email.subject, html: email.html, text: email.text })
     return { status: 'sent', note: null }
   } catch (error) {
-    payload.logger.error({ err: error, msg: `supplies: low-stock email for ${item.id} failed` })
+    payload.logger.error({ err: error, msg: `kitting: low-stock email for ${item.id} failed` })
     return { status: 'failed', note: String((error as Error)?.message ?? error).slice(0, 200) }
   }
 }

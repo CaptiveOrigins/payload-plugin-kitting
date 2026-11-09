@@ -1,5 +1,5 @@
-export { suppliesPlugin } from './plugin.js'
-export { ALLOW_DELETE, applyRecipe, defaultAlertEmail, isBelowLevel, sendPendingAlerts, stockReport, suggestedReorder, SuppliesError, type StockRow } from './stock.js'
+export { kittingPlugin } from './plugin.js'
+export { ALLOW_DELETE, applyRecipe, defaultAlertEmail, isBelowLevel, sendPendingAlerts, stockReport, suggestedReorder, KittingError, type StockRow } from './stock.js'
 export type {
   AlertItem,
   AlertStatus,
@@ -10,5 +10,5 @@ export type {
   RecipeRef,
   SendEmail,
   Shortage,
-  SuppliesPluginOptions,
+  KittingPluginOptions,
 } from './types.js'

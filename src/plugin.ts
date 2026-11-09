@@ -1,14 +1,14 @@
 import type { Access, CollectionConfig, Config, Plugin } from 'payload'
 
 import { itemsCollection, movementsCollection, recipesCollection, suppliersCollection } from './collections.js'
-import type { ResolvedSupplies, SuppliesPluginOptions } from './types.js'
+import type { ResolvedSupplies, KittingPluginOptions } from './types.js'
 
 /**
  * Supplies: items, suppliers, an append-only stock log, recipes that use stock in one transaction,
  * one low-stock email per drop below the level, and a reorder list in the admin.
  */
-export const suppliesPlugin =
-  (options: SuppliesPluginOptions = {}): Plugin =>
+export const kittingPlugin =
+  (options: KittingPluginOptions = {}): Plugin =>
   (config: Config): Config => {
     const userSlug = config.admin?.user ?? 'users'
     const signedIn: Access = ({ req }) => Boolean(req.user && req.user.collection === userSlug)
@@ -40,15 +40,15 @@ export const suppliesPlugin =
     const components = config.admin?.components ?? {}
     return {
       ...config,
-      custom: { ...config.custom, supplies: o },
+      custom: { ...config.custom, kitting: o },
       collections: [...(config.collections ?? []).filter((c) => !added.some((a) => a.slug === c.slug)), ...added],
       admin: o.adminView
         ? {
             ...config.admin,
             components: {
               ...components,
-              afterNavLinks: [...(components.afterNavLinks ?? []), '@captiveorigins/payload-plugin-supplies/rsc#SuppliesNavLink'],
-              views: { ...components.views, supplies: { Component: '@captiveorigins/payload-plugin-supplies/rsc#SuppliesView', path: '/supplies' } },
+              afterNavLinks: [...(components.afterNavLinks ?? []), '@captiveorigins/payload-plugin-kitting/rsc#SuppliesNavLink'],
+              views: { ...components.views, supplies: { Component: '@captiveorigins/payload-plugin-kitting/rsc#SuppliesView', path: '/supplies' } },
             },
           }
         : config.admin,

@@ -28,7 +28,7 @@ export type AlertItem = {
   scope?: ID | null
 }
 
-export type SuppliesPluginOptions = {
+export type KittingPluginOptions = {
   /** Collection slugs. Defaults: `supply-items`, `suppliers`, `supply-movements`, `supply-recipes`. */
   slugs?: { items?: string; suppliers?: string; movements?: string; recipes?: string }
   /**
@@ -79,10 +79,10 @@ export type ResolvedSupplies = {
   manage: Access
   scopeField?: string
   negativeStock: NegativeStock
-  recipients: NonNullable<NonNullable<SuppliesPluginOptions['alerts']>['recipients']>
-  canSend: NonNullable<NonNullable<SuppliesPluginOptions['alerts']>['canSend']>
+  recipients: NonNullable<NonNullable<KittingPluginOptions['alerts']>['recipients']>
+  canSend: NonNullable<NonNullable<KittingPluginOptions['alerts']>['canSend']>
   sendEmail?: SendEmail
-  render?: NonNullable<SuppliesPluginOptions['alerts']>['render']
+  render?: NonNullable<KittingPluginOptions['alerts']>['render']
   adminView: boolean
   adminGroup: string
 }

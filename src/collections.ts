@@ -1,6 +1,6 @@
 import type { CollectionAfterChangeHook, CollectionAfterOperationHook, CollectionBeforeChangeHook, CollectionBeforeDeleteHook, CollectionConfig, CollectionSlug, PayloadRequest } from 'payload'
 
-import { ALLOW_DELETE, INTERNAL, alertFields, applyMovementToItem, asInternal, idOf, prepareMovement, round, sameID, sendPendingAlerts, SuppliesError } from './stock.js'
+import { ALLOW_DELETE, INTERNAL, alertFields, applyMovementToItem, asInternal, idOf, prepareMovement, round, sameID, sendPendingAlerts, KittingError } from './stock.js'
 import type { ResolvedSupplies } from './types.js'
 
 type Doc = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -25,8 +25,8 @@ const sendForTouched =
 async function sameScope(req: PayloadRequest, o: ResolvedSupplies, scope: unknown, collection: string, id: unknown, what: string) {
   if (!o.scopeField || idOf(id) === null) return
   const doc = (await req.payload.findByID({ collection: collection as CollectionSlug, id: idOf(id)!, ...sys, disableErrors: true, req })) as Doc | null
-  if (!doc) throw new SuppliesError('notFound', `${what} doesn’t exist.`)
-  if (!sameID(doc[o.scopeField], scope)) throw new SuppliesError('scope', `${what} belongs to another ${o.scopeField}.`)
+  if (!doc) throw new KittingError('notFound', `${what} doesn’t exist.`)
+  if (!sameID(doc[o.scopeField], scope)) throw new KittingError('scope', `${what} belongs to another ${o.scopeField}.`)
 }
 
 export function itemsCollection(o: ResolvedSupplies): CollectionConfig {
@@ -37,7 +37,7 @@ export function itemsCollection(o: ResolvedSupplies): CollectionConfig {
     const effectiveLevel = retired ? null : level
     if (operation === 'create') {
       const opening = typeof data.openingStock === 'number' ? data.openingStock : typeof data.onHand === 'number' ? data.onHand : 0
-      if (!Number.isFinite(opening) || opening < 0) throw new SuppliesError('quantity', 'Opening stock can’t be below zero.')
+      if (!Number.isFinite(opening) || opening < 0) throw new KittingError('quantity', 'Opening stock can’t be below zero.')
       data.onHand = round(opening)
       for (const f of ALERT_FIELDS) data[f] = null
       Object.assign(data, alertFields({}, data.onHand, effectiveLevel))
@@ -63,7 +63,7 @@ export function itemsCollection(o: ResolvedSupplies): CollectionConfig {
   const beforeDelete: CollectionBeforeDeleteHook = async ({ id, req }) => {
     if (req.context?.[ALLOW_DELETE]) return
     const used = await req.payload.count({ collection: o.movements as CollectionSlug, where: { item: { equals: id } }, overrideAccess: true, req })
-    if (used.totalDocs) throw new SuppliesError('hasHistory', 'This supply has stock history, so it can’t be deleted. Tick “No longer used” instead.')
+    if (used.totalDocs) throw new KittingError('hasHistory', 'This supply has stock history, so it can’t be deleted. Tick “No longer used” instead.')
   }
   return {
     slug: o.items,
@@ -154,8 +154,8 @@ export function suppliersCollection(o: ResolvedSupplies): CollectionConfig {
 
 export function movementsCollection(o: ResolvedSupplies): CollectionConfig {
   const beforeChange: CollectionBeforeChangeHook = async ({ data, operation, req }) => {
-    if (operation !== 'create') throw new SuppliesError('appendOnly', 'Stock movements can’t be changed. Record an adjustment instead.')
-    if (idOf(data.item) === null) throw new SuppliesError('itemRequired', 'Choose a supply.')
+    if (operation !== 'create') throw new KittingError('appendOnly', 'Stock movements can’t be changed. Record an adjustment instead.')
+    if (idOf(data.item) === null) throw new KittingError('itemRequired', 'Choose a supply.')
     return prepareMovement(req, data)
   }
   const afterChange: CollectionAfterChangeHook = async ({ doc, operation, req }) => {
@@ -163,7 +163,7 @@ export function movementsCollection(o: ResolvedSupplies): CollectionConfig {
     return doc
   }
   const beforeDelete: CollectionBeforeDeleteHook = ({ req }) => {
-    if (!req.context?.[ALLOW_DELETE]) throw new SuppliesError('appendOnly', 'Stock movements can’t be deleted. Record an adjustment instead.')
+    if (!req.context?.[ALLOW_DELETE]) throw new KittingError('appendOnly', 'Stock movements can’t be deleted. Record an adjustment instead.')
   }
   return {
     slug: o.movements,
@@ -174,7 +174,7 @@ export function movementsCollection(o: ResolvedSupplies): CollectionConfig {
       description: 'The stock log. Each line is permanent: to fix a mistake, record an adjustment.',
     },
     defaultSort: '-createdAt',
-    // Append-only, whatever the host's access says. Trusted cleanup scripts pass `suppliesAllowDelete`.
+    // Append-only, whatever the host's access says. Trusted cleanup scripts pass `kittingAllowDelete`.
     access: { read: o.read, create: o.manage, update: never, delete: never },
     hooks: { beforeChange: [beforeChange], afterChange: [afterChange], beforeDelete: [beforeDelete], afterOperation: [sendForTouched((r) => [r.item])] },
     fields: [
@@ -222,7 +222,7 @@ export function recipesCollection(o: ResolvedSupplies): CollectionConfig {
     const key = String(data.key ?? originalDoc?.key ?? '')
       .trim()
       .toLowerCase()
-    if (!KEY.test(key)) throw new SuppliesError('key', 'The key is lowercase letters, numbers and hyphens, like sample-kit.')
+    if (!KEY.test(key)) throw new KittingError('key', 'The key is lowercase letters, numbers and hyphens, like sample-kit.')
     data.key = key
     const scope = o.scopeField ? (data[o.scopeField] ?? originalDoc?.[o.scopeField]) : undefined
     const clash = await req.payload.find({
@@ -233,7 +233,7 @@ export function recipesCollection(o: ResolvedSupplies): CollectionConfig {
       ...sys,
       req,
     })
-    if (clash.docs.length) throw new SuppliesError('keyTaken', `Another recipe already uses the key "${key}".`)
+    if (clash.docs.length) throw new KittingError('keyTaken', `Another recipe already uses the key "${key}".`)
     for (const line of (data.lines ?? []) as Doc[]) await sameScope(req, o, scope, o.items, line.item, 'A supply in this recipe')
     return data
   }

@@ -1,17 +1,17 @@
 {
-  "name": "@captiveorigins/payload-plugin-supplies",
+  "name": "@captiveorigins/payload-plugin-kitting",
   "version": "0.1.0",
-  "description": "Supplies for Payload: track what goes into the things you make, with suppliers, stock from an append-only movement log, recipes that use stock in one transaction, one low-stock email per drop and a reorder list.",
-  "homepage": "https://github.com/CaptiveOrigins/payload-plugin-supplies#readme",
+  "description": "Kitting for Payload: track supplies, and optionally build multi-part products (kits) from them, with suppliers, stock from an append-only movement log, recipes that use stock in one transaction, one low-stock email per drop and a reorder list.",
+  "homepage": "https://github.com/CaptiveOrigins/payload-plugin-kitting#readme",
   "bugs": {
-    "url": "https://github.com/CaptiveOrigins/payload-plugin-supplies/issues"
+    "url": "https://github.com/CaptiveOrigins/payload-plugin-kitting/issues"
   },
   "keywords": [
     "payload",
     "payload-plugin",
     "payloadcms",
+    "kitting",
     "inventory",
-    "stock",
     "supplies",
     "bill-of-materials",
     "low-stock",
@@ -21,7 +21,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/CaptiveOrigins/payload-plugin-supplies.git"
+    "url": "git+https://github.com/CaptiveOrigins/payload-plugin-kitting.git"
   },
   "type": "module",
   "exports": {
