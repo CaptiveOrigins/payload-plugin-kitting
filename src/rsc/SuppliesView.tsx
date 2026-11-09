@@ -141,6 +141,7 @@ export async function SuppliesView({ initPageResult, params, searchParams }: Adm
                 {!o.boxSource && <li><a className="btn btn--style-secondary btn--size-small" style={{ margin: 0 }} href={`${admin}/collections/${o.boxes}`}>Boxes</a></li>}
                 <li><a className="btn btn--style-secondary btn--size-small" style={{ margin: 0 }} href={`${admin}/collections/${o.lots}`}>Lots</a></li>
                 <li><a className="btn btn--style-secondary btn--size-small" style={{ margin: 0 }} href={`${admin}/collections/${o.movements}`}>Stock log</a></li>
+                <li><a className="btn btn--style-secondary btn--size-small" style={{ margin: 0 }} href={`${admin}/collections/${o.settings}`}>Settings</a></li>
               </ul>
             </nav>
 

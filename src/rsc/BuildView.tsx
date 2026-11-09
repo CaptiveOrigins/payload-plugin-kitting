@@ -3,7 +3,7 @@ import type { AdminViewServerProps, CollectionSlug } from 'payload'
 import React from 'react'
 
 import { BuildForm } from '../client/BuildForm.js'
-import { describeUse, getItem, num, suppliesOf, shrinkagePercent } from '../stock.js'
+import { describeUse, getItem, idOf, num, shrinkagePercent, siteShrinkage, suppliesOf } from '../stock.js'
 
 type Doc = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -19,6 +19,7 @@ export async function BuildView({ initPageResult, params, searchParams }: AdminV
   const options = []
   for (const r of recipes) {
     const uses: string[] = []
+    const site = await siteShrinkage(req.payload, o, {}, o.scopeField ? idOf(r[o.scopeField]) : null)
     for (const line of (r.lines ?? []) as Doc[]) {
       if (line.type === 'recipe') {
         const sub = (await req.payload.findByID({ collection: o.recipes as CollectionSlug, id: line.recipe, depth: 0, overrideAccess: true, disableErrors: true })) as Doc | null
@@ -26,7 +27,7 @@ export async function BuildView({ initPageResult, params, searchParams }: AdminV
         continue
       }
       const item = await getItem(req.payload, o, {}, line.item)
-      if (item) uses.push(describeUse({ quantity: num(line.quantity) ?? 0, unit: String(line.unit || item.unit), name: String(item.name), percent: shrinkagePercent(o, item, r, line) }))
+      if (item) uses.push(describeUse({ quantity: num(line.quantity) ?? 0, unit: String(line.unit || item.unit), name: String(item.name), percent: shrinkagePercent(site, item, r, line) }))
     }
     options.push({ id: String(r.id), name: String(r.name), maxPerBatch: num(r.maxPerBatch), uses })
   }

@@ -4,7 +4,7 @@ import { MongoMemoryReplSet } from 'mongodb-memory-server'
 import { buildConfig, getPayload, type Access, type CollectionConfig, type Field, type Payload } from 'payload'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
-import { applyRecipe, assignUnits, recommendBoxes, setupProgress, stockCount, buildUnits, recommendReadyStock, release, shipUnits, swapUnit, kittingPlugin, KittingError, voidUnit, sendPendingAlerts, stockReport, suggestShrinkagePercent, writeOffExpired } from '../src/index.js'
+import { applyRecipe, assignUnits, recommendBoxes, setupProgress, siteShrinkage, stockCount, buildUnits, recommendReadyStock, release, shipUnits, swapUnit, kittingPlugin, KittingError, voidUnit, sendPendingAlerts, stockReport, suggestShrinkagePercent, writeOffExpired } from '../src/index.js'
 
 // Made-up data throughout: example.com addresses, invented supplies and sites.
 type Doc = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -63,7 +63,7 @@ beforeAll(async () => {
             canSend: () => emailOn,
             sendEmail: async ({ to, subject, text }) => void mail.push({ to, subject, text }),
           },
-          overrides: { items: withTenant, suppliers: withTenant, movements: withTenant, recipes: withTenant, lots: withTenant, units: withTenant, requests: withTenant, boxes: withTenant, postage: withTenant },
+          overrides: { items: withTenant, suppliers: withTenant, movements: withTenant, recipes: withTenant, lots: withTenant, units: withTenant, requests: withTenant, boxes: withTenant, postage: withTenant, settings: withTenant },
           units: {
             onBuild: ({ unit }) => {
               if (unit.externalId === refuseBuild) throw new Error('the host said no')
@@ -892,5 +892,32 @@ describe('stock count and getting started', () => {
     expect(p.supplies).toBeGreaterThan(0)
     expect(typeof p.counted).toBe('boolean')
     expect(await setupProgress(payload, { user: { ...staffA, collection: 'users' } })).toMatchObject({ counted: true })
+  })
+})
+
+describe('shrinkage settings per site', () => {
+  it('lets a site switch shrinkage off or change its default, without touching other sites', async () => {
+    const make = async (site: Doc) => {
+      const item = await create('supply-items', { tenant: site.id, name: 'Setting swab', unit: 'each', openingStock: 1000 })
+      const recipe = await create('supply-recipes', { tenant: site.id, name: 'Setting kit', key: `sk-${Math.random().toString(36).slice(2, 8)}`, lines: [{ item: item.id, quantity: 10 }] })
+      return { item, recipe }
+    }
+    const a = await make(siteA)
+    const b = await make(siteB)
+    const use = async (x: { recipe: Doc }, site: Doc) => (await applyRecipe(payload, { id: x.recipe.id }, 1, { scope: site.id })).movements[0]!.change
+    // The plugin's config: on, 0% by default.
+    expect(await use(a, siteA)).toBe(-10)
+    const settings = await create('kitting-settings', { tenant: siteA.id, shrinkageDefaultPercent: 10 }, as(staffA))
+    expect(await use(a, siteA)).toBe(-11)
+    expect(await use(b, siteB)).toBe(-10) // site B unchanged
+    await payload.update({ collection: 'kitting-settings' as never, id: settings.id, data: { shrinkage: 'off' } as never, ...as(staffA) })
+    expect(await use(a, siteA)).toBe(-10)
+    expect((await siteShrinkage(payload, payload.config.custom!.kitting, {}, siteA.id)).shrinkage).toEqual({ enabled: false, defaultPercent: 10 })
+    // One set of settings per site, and only for people who manage it.
+    await expect(create('kitting-settings', { tenant: siteA.id, shrinkage: 'on' }, as(staffA))).rejects.toThrow(/already has Kitting settings/)
+    await expect(create('kitting-settings', { tenant: siteA.id, shrinkage: 'on' }, as(viewerA))).rejects.toThrow()
+    await expect(payload.update({ collection: 'kitting-settings' as never, id: settings.id, data: { shrinkage: 'on' } as never, ...as(staffB) })).rejects.toThrow()
+    await expect(payload.find({ collection: 'kitting-settings' as never, overrideAccess: false })).rejects.toThrow()
+    expect((await payload.find({ collection: 'kitting-settings' as never, ...as(staffB) })).docs).toHaveLength(0)
   })
 })

@@ -127,3 +127,8 @@ The waste and dud buffer is called **shrinkage**, the standard business term for
 ## 2026-11-08 (owner): test locally first, then publish
 
 The first npm version comes only after the owner has tried Kitting by hand: owner test T14 in the ops tests list, then N29 (the publish) with "Needs first: T14 passed". T14 runs on the owner's Mac against a locally packed copy (`npm pack`) and the platform's local Kitting branch, with nothing published, pushed or merged. The platform branch `supplies-plugin` waits for N29. This keeps the rule that the first published version has no untried UI.
+
+## 2026-11-09 (made while building; the owner can change them)
+
+- **Kitting settings.** These are a collection with one document per site, not a Payload global, because globals can't be per site. A site's settings override the plugin's config. The config values are only the starting point.
+- **Learned shrinkage.** It's shown on each supply's page, and only a person's click applies it, which keeps "the person decides".
