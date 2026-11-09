@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 (not released yet)
+## 0.2.0 (2026-11-09)
 
 **Upgrading from 0.1.0:** there's one new collection, `kitting-settings` (one per site). If you use a tenant plugin, add it to your site-owned collections next to Kitting's others, and build its indexes before first use. Nothing else changes for existing data.
 
