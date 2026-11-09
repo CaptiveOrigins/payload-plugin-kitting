@@ -572,3 +572,79 @@ describe('the builder', () => {
     expect(empty.recommendations[0]).toMatchObject({ target: 5, fallback: true, buildNow: 2 })
   })
 })
+
+describe('test audit 2026-11-08: gaps closed', () => {
+  const run = () => Math.random().toString(36).slice(2, 7).toUpperCase()
+  async function lotKit(site: Doc) {
+    const swab = await create('supply-items', { tenant: site.id, name: 'Audit swab', unit: 'each', trackLots: true, openingStock: 4, openingLotNumber: `L-${run()}`, openingExpiresOn: '2099-01-01T00:00:00.000Z' })
+    const recipe = await create('supply-recipes', { tenant: site.id, name: 'Audit kit', key: `ak-${run().toLowerCase()}`, lines: [{ item: swab.id, quantity: 2 }] })
+    return { swab, recipe }
+  }
+
+  it('keeps lots and built units to their own site, readable by viewers, writable by nobody else', async () => {
+    const a = await lotKit(siteA)
+    const b = await lotKit(siteB)
+    await buildUnits(payload, { id: a.recipe.id }, [`IA-${run()}`], { scope: siteA.id })
+    await buildUnits(payload, { id: b.recipe.id }, [`IB-${run()}`], { scope: siteB.id })
+    for (const collection of ['supply-lots', 'assembled-units']) {
+      const mine = (await payload.find({ collection: collection as never, ...as(staffA), pagination: false, depth: 0 })).docs as Doc[]
+      expect(mine.length).toBeGreaterThan(0)
+      expect(mine.every((d) => String(d.tenant) === String(siteA.id))).toBe(true)
+      expect(((await payload.find({ collection: collection as never, ...as(viewerA), pagination: false, depth: 0 })).docs as Doc[]).length).toBe(mine.length)
+      await expect(payload.find({ collection: collection as never, overrideAccess: false })).rejects.toThrow()
+    }
+    // Staff of B can't add a lot to A's supply (a lot takes its site from the supply), nor can a viewer.
+    await expect(create('supply-lots', { tenant: siteB.id, item: a.swab.id, lotNumber: 'SNEAK' }, as(staffB))).rejects.toThrow(/can’t add or change lots/)
+    await expect(create('supply-lots', { tenant: siteA.id, item: a.swab.id, lotNumber: 'VIEW' }, as(viewerA))).rejects.toThrow()
+    const lotA = ((await payload.find({ collection: 'supply-lots' as never, where: { item: { equals: a.swab.id } }, depth: 0 })).docs as Doc[])[0]!
+    await expect(payload.update({ collection: 'supply-lots' as never, id: lotA.id, data: { lotNumber: 'X' } as never, ...as(staffB) })).rejects.toThrow()
+    await expect(payload.update({ collection: 'supply-lots' as never, id: lotA.id, data: { lotNumber: 'X' } as never, ...as(viewerA) })).rejects.toThrow()
+  })
+
+  it('voids over HTTP only for people who manage that site', async () => {
+    const a = await lotKit(siteA)
+    const { units } = await buildUnits(payload, { id: a.recipe.id }, [`VH-${run()}`], { scope: siteA.id })
+    const endpoint = payload.config.endpoints.find((e) => e.path === '/kitting/void')!
+    const call = (user: Doc | null) => endpoint.handler({ payload, user: user && { ...user, collection: 'users' }, json: async () => ({ unit: units[0]!.id, reason: 'dud' }) } as never) as Promise<Response>
+    expect((await call(null)).status).toBe(401)
+    expect((await call(staffB)).status).toBe(403)
+    expect((await call(viewerA)).status).toBe(403)
+    expect((await get('assembled-units', units[0]!.id)).status).toBe('ready')
+    expect((await call(staffA)).status).toBe(200)
+    expect((await get('assembled-units', units[0]!.id)).status).toBe('void')
+  })
+
+  it('refuses a build without enough stock and writes nothing', async () => {
+    const a = await lotKit(siteA) // 4 swabs, 2 per kit
+    const before = (await movementsOf(a.swab)).length
+    const e = await buildUnits(payload, { id: a.recipe.id }, [`S1-${run()}`, `S2-${run()}`, `S3-${run()}`], { scope: siteA.id }).catch((x) => x)
+    expect(e).toMatchObject({ code: 'notEnoughStock', shortages: [expect.objectContaining({ onHand: 4, needed: 6, short: 2 })] })
+    expect((await get('supply-items', a.swab.id)).onHand).toBe(4)
+    expect((await movementsOf(a.swab)).length).toBe(before)
+    expect((await payload.count({ collection: 'assembled-units' as never, where: { recipe: { equals: a.recipe.id } } })).totalDocs).toBe(0)
+  })
+
+  it('lets only one of two builds at once use the same ID', async () => {
+    const swab = await create('supply-items', { tenant: siteA.id, name: 'Race swab', unit: 'each', openingStock: 100 })
+    const r1 = await create('supply-recipes', { tenant: siteA.id, name: 'Race 1', key: `r1-${run().toLowerCase()}`, lines: [{ item: swab.id, quantity: 1 }] })
+    const other = await create('supply-items', { tenant: siteA.id, name: 'Race tube', unit: 'each', openingStock: 100 })
+    const r2 = await create('supply-recipes', { tenant: siteA.id, name: 'Race 2', key: `r2-${run().toLowerCase()}`, lines: [{ item: other.id, quantity: 1 }] })
+    const id = `RACE-${run()}`
+    const results = await Promise.allSettled([buildUnits(payload, { id: r1.id }, [id], { scope: siteA.id }), buildUnits(payload, { id: r2.id }, [id], { scope: siteA.id })])
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
+    expect((await payload.count({ collection: 'assembled-units' as never, where: { externalId: { equals: id } } })).totalDocs).toBe(1)
+    // The loser took nothing off stock.
+    expect((await get('supply-items', swab.id)).onHand + (await get('supply-items', other.id)).onHand).toBe(199)
+  })
+
+  it('writes an expired lot off once, and refuses a recipe unit that can’t convert', async () => {
+    const milk = await create('supply-items', { tenant: siteA.id, name: 'Audit milk', unit: 'ml', trackLots: true, openingStock: 500, openingLotNumber: `M-${run()}`, openingExpiresOn: '2020-01-01T00:00:00.000Z' })
+    await writeOffExpired(payload)
+    const once = (await movementsOf(milk)).filter((m) => m.kind === 'written-off').length
+    await writeOffExpired(payload)
+    expect([once, (await movementsOf(milk)).filter((m) => m.kind === 'written-off').length]).toEqual([1, 1])
+    expect((await get('supply-items', milk.id)).onHand).toBe(0)
+    const bad = await create('supply-recipes', { tenant: siteA.id, name: 'Bad unit', key: `bu-${run().toLowerCase()}`, lines: [{ item: milk.id, quantity: 1, unit: 'kg' }] })
+    await expect(applyRecipe(payload, { id: bad.id }, 1, { scope: siteA.id })).rejects.toThrow(/can’t be converted/)
+  })
+})

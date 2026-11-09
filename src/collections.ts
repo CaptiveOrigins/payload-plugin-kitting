@@ -1,6 +1,6 @@
 import type { CollectionAfterChangeHook, CollectionAfterOperationHook, CollectionBeforeChangeHook, CollectionBeforeDeleteHook, CollectionConfig, CollectionSlug, PayloadRequest } from 'payload'
 
-import { ALLOW_DELETE, INTERNAL, alertFields, applyMovementToItem, asInternal, idOf, prepareMovement, round, sameID, sendPendingAlerts, KittingError } from './stock.js'
+import { ALLOW_DELETE, INTERNAL, alertFields, applyMovementToItem, mayManage, asInternal, idOf, prepareMovement, round, sameID, sendPendingAlerts, KittingError } from './stock.js'
 import type { ResolvedSupplies } from './types.js'
 import { STOCK_METHODS } from './stocklevel.js'
 import { normalizeUnit } from './units.js'
@@ -530,6 +530,8 @@ export function lotsCollection(o: ResolvedSupplies): CollectionConfig {
     const item = itemID === null ? null : ((await req.payload.findByID({ collection: o.items as CollectionSlug, id: itemID, ...sys, disableErrors: true, req })) as Doc | null)
     if (!item) throw new KittingError('itemRequired', 'Choose a supply.')
     if (operation === 'update' && !sameID(item.id, originalDoc?.item)) throw new KittingError('lot', 'A lot can’t move to another supply.')
+    // A lot takes its owner from its supply, so the person must be able to manage that supply.
+    if (!internal && req.user && !(await mayManage(req, o, item.id))) throw new KittingError('forbidden', 'You can’t add or change lots of that supply.')
     if (!internal) data.onHand = operation === 'create' ? 0 : (originalDoc?.onHand ?? 0)
     if (o.scopeField) data[o.scopeField] = idOf(item[o.scopeField])
     const lotNumber = data.lotNumber !== undefined ? data.lotNumber : originalDoc?.lotNumber
@@ -610,6 +612,8 @@ export function unitsCollection(o: ResolvedSupplies): CollectionConfig {
       description: 'Things built from a recipe, each with its own ID. Build them on the Build page; each records the lots that went into it.',
     },
     defaultSort: '-builtAt',
+    // One unit per ID per site, enforced by the database too, so two builds at once can't both use an ID.
+    indexes: [{ fields: o.scopeField ? ['externalId', o.scopeField] : ['externalId'], unique: true }],
     access: { read: o.read, create: o.manage, update: o.manage, delete: o.manage },
     hooks: { beforeChange: [beforeChange], beforeDelete: [beforeDelete] },
     fields: [
