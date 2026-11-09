@@ -52,6 +52,23 @@ export type KittingPluginOptions = {
    */
   shipping?: { provider?: ShippingProvider; currency?: string }
   /**
+   * Native integration with Payload's ecommerce plugin (level 3), off unless `enabled`. Put Kitting after
+   * the ecommerce plugin in `plugins`. Products and variants get a "Built from recipe" field; their
+   * "Ready to send" (and `inventory`, when the shop counts inventory) follow the ready units. A new
+   * order is given ready units (or queued builds) per kitted line, and a cancelled or refunded one gives
+   * them back. Hosts that assign units in their own order path leave this off, or skip those orders.
+   */
+  ecommerce?: {
+    enabled?: boolean
+    products?: string
+    variants?: string
+    orders?: string
+    /** The reference on units and requests. Default `Order <id>`. */
+    reference?: (order: Record<string, unknown>) => string
+    /** Return true to leave an order alone (for example one your own code fulfils). */
+    skipOrder?: (order: Record<string, unknown>) => boolean
+  }
+  /**
    * Built units (level 2): things you build from a recipe and label with an external ID, such as a
    * kit with the ID printed on its tube. `onBuild` runs for each unit inside the build's transaction,
    * so your own record (for example a kit in your app) is created or linked in the same commit; throw
@@ -128,6 +145,7 @@ export type ResolvedSupplies = {
   onBuild?: NonNullable<KittingPluginOptions['units']>['onBuild']
   shippingProvider?: ShippingProvider
   currency: string
+  ecommerce: { enabled: boolean; products: string; variants: string; orders: string; reference: (order: Record<string, unknown>) => string; skipOrder?: (order: Record<string, unknown>) => boolean }
   userSlug: string
   read: Access
   manage: Access

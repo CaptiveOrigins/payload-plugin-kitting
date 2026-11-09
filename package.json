@@ -60,6 +60,7 @@
   "devDependencies": {
     "@payloadcms/db-mongodb": "3.92.1",
     "@payloadcms/next": "3.92.1",
+    "@payloadcms/plugin-ecommerce": "3.92.1",
     "@payloadcms/ui": "3.92.1",
     "@types/node": "^24.0.0",
     "@types/react": "^19.3.0",

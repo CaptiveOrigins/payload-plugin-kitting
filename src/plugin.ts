@@ -1,6 +1,7 @@
 import type { Access, CollectionConfig, Config, Plugin } from 'payload'
 
 import { boxesCollection, itemsCollection, lotsCollection, postageCollection, requestsCollection, unitsCollection, movementsCollection, recipesCollection, suppliersCollection } from './collections.js'
+import { withEcommerce } from './ecommerce.js'
 import { kittingEndpoints } from './endpoints.js'
 import type { ResolvedSupplies, KittingPluginOptions } from './types.js'
 
@@ -28,6 +29,14 @@ export const kittingPlugin =
       onBuild: options.units?.onBuild,
       shippingProvider: options.shipping?.provider,
       currency: options.shipping?.currency ?? 'USD',
+      ecommerce: {
+        enabled: options.ecommerce?.enabled ?? false,
+        products: options.ecommerce?.products ?? 'products',
+        variants: options.ecommerce?.variants ?? 'variants',
+        orders: options.ecommerce?.orders ?? 'orders',
+        reference: options.ecommerce?.reference ?? ((order) => `Order ${String(order.id)}`),
+        skipOrder: options.ecommerce?.skipOrder,
+      },
       userSlug,
       read: options.access?.read ?? options.access?.manage ?? signedIn,
       manage: options.access?.manage ?? signedIn,
@@ -60,7 +69,7 @@ export const kittingPlugin =
     return {
       ...config,
       custom: { ...config.custom, kitting: o },
-      collections: [...(config.collections ?? []).filter((c) => !added.some((a) => a.slug === c.slug)), ...added],
+      collections: [...withEcommerce(o, (config.collections ?? []).filter((c) => !added.some((a) => a.slug === c.slug))), ...added],
       endpoints: [...(config.endpoints ?? []), ...kittingEndpoints],
       admin: o.adminView
         ? {

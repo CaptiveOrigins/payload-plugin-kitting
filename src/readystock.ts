@@ -1,5 +1,6 @@
 import type { CollectionSlug, Payload, PayloadRequest, Where } from 'payload'
 
+import { syncAvailability } from './ecommerce.js'
 import { asInternal, idOf, isBelowLevel, lotsOf, num, planRecipe, round, suppliesOf, transaction, usable } from './stock.js'
 import type { AlertStatus, ID, ResolvedSupplies } from './types.js'
 
@@ -97,6 +98,7 @@ export async function refreshStockStates(payload: Payload, options: { req?: Req;
         }),
       )
     }
+    await syncAvailability(payload, { req })
     return { changed }
   })
 }

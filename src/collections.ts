@@ -676,7 +676,7 @@ export function unitsCollection(o: ResolvedSupplies): CollectionConfig {
     access: { read: o.read, create: o.manage, update: o.manage, delete: o.manage },
     hooks: { beforeChange: [beforeChange], beforeDelete: [beforeDelete] },
     fields: [
-      { name: 'externalId', type: 'text', required: true, index: true, label: 'ID', admin: { readOnly: true, description: 'The ID on the unit, for example the one printed on a tube.' } },
+      { name: 'externalId', type: 'text', required: true, index: Boolean(o.scopeField), label: 'ID', admin: { readOnly: true, description: 'The ID on the unit, for example the one printed on a tube.' } },
       { name: 'recipe', type: 'relationship', relationTo: o.recipes as CollectionSlug, required: true, label: 'Recipe', admin: { readOnly: true } },
       {
         name: 'status',
