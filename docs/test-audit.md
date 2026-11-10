@@ -114,3 +114,7 @@ Skipped: rendering the supply page's suggestion in tests, which needs the full a
 - **Site isolation of the arrivals:** Restock filters them by what the person may receive, and that's tested in Restock (`awaitingConfirmation` with a user). Kitting passes the person through unchanged, which the new test checks.
 - **Rendering the Today line:** needs the full admin, as before. It was checked in a browser on 2026-11-09.
 
+### Added the same day: partial carrier rates (crossing `kitting-shipping`)
+
+Kits' shipping provider (draft platform PR #61) prices a box as outbound plus one return label, and returns no rates without a key or a destination. Before this, a carrier that priced only some packings was ranked in one list with packings priced from postage rates, so a partly priced packing could look cheaper than it was. The box suggestion test now covers a carrier that prices some boxes (carrier-priced packings first, with a note) and one that prices none (postage rates, with its reason).
+

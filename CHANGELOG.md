@@ -4,7 +4,9 @@
 
 - **`restockArrivals(payload, { req })`:** Restock's "Arrived, please confirm" orders for the Today line, now a tested function instead of code inside the admin view. It's empty for anyone who can't manage supplies (Restock isn't asked), and when Restock fails, Today still loads without that line and the error is logged. Before this, a Restock failure was swallowed with no log.
 
-Tested: 68 integration tests (1 new).
+- **Box suggestions with a carrier that prices only some boxes:** packings it priced now come first, then the rest, each by cost, with a note. A carrier's price (which may include a return label) and your postage rates aren't comparable, so they're no longer ranked in one list. A carrier that gives no rates at all now says so plainly, instead of asking whether box sizes are set.
+
+Tested: 68 integration tests (1 new, 1 extended).
 
 ## 0.2.0 (2026-11-09)
 

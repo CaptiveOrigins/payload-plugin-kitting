@@ -815,6 +815,31 @@ describe('box suggestions', () => {
     const fallback = await recommendBoxes(payload, { recipe: { id: recipe.id }, count: 5, provider: broken })
     expect(fallback.packings[0]!.total).toBe(12.2)
     expect(fallback.notes).toContain('Rates unavailable from Down Post; ranked by box cost and your postage rates.')
+
+    // A carrier that rates only some boxes (here, a price that includes a return label). Its prices
+    // aren't comparable with your postage rates, so carrier-priced packings come first, and it says so.
+    const partial: ShippingProvider = {
+      name: 'Part Post',
+      quoteRates: async ({ boxes }) => ({
+        quotedAt: new Date().toISOString(),
+        rates: boxes.filter((b) => b.weight.value > 500).map((b) => ({ boxId: b.id, carrier: 'Part Post', service: 'Ground + return label', amount: 20, currency: 'USD' })),
+        notes: ['made-up: small boxes not rated'],
+      }),
+    }
+    const mixed = await recommendBoxes(payload, { recipe: { id: recipe.id }, count: 5, provider: partial })
+    expect(mixed.packings.map((p) => [p.total, p.basis])).toEqual([
+      [23, 'carrier'], // big box 3 + 20
+      [12.2, 'postage-rates'],
+      [13, 'postage-rates'],
+    ])
+    expect(mixed.notes).toContain('Part Post had no rate for some packings, so they are listed after the ones it priced: their postage comes from your postage rates and isn’t comparable.')
+    expect(mixed.notes).toContain('Part Post: made-up: small boxes not rated')
+
+    // A carrier that rates nothing (no key, no destination): your postage rates, and its reason.
+    const none: ShippingProvider = { name: 'No Post', quoteRates: async () => ({ quotedAt: new Date().toISOString(), rates: [], notes: ['made-up: no destination'] }) }
+    const unrated = await recommendBoxes(payload, { recipe: { id: recipe.id }, count: 5, provider: none })
+    expect(unrated.packings[0]!.total).toBe(12.2)
+    expect(unrated.notes).toEqual(expect.arrayContaining(['No Post gave no rates; ranked by box cost and your postage rates.', 'No Post: made-up: no destination']))
   })
 })
 

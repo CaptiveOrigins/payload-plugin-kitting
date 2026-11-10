@@ -152,9 +152,15 @@ export async function recommendBoxes(
           p.basis = 'carrier'
         }
       }
-      if (candidates.some((p) => p.basis !== 'carrier')) notes.push(`${provider.name} had no rate for some boxes (are their sizes set?); those use your postage rates.`)
+      const priced = candidates.filter((p) => p.basis === 'carrier')
+      if (!priced.length) notes.push(`${provider.name} gave no rates; ranked by box cost and your postage rates.`)
+      else if (priced.length < candidates.length)
+        notes.push(`${provider.name} had no rate for some packings, so they are listed after the ones it priced: their postage comes from your postage rates and isn’t comparable.`)
       for (const n of result.notes ?? []) notes.push(`${provider.name}: ${n}`)
-      ranked = [...candidates, ...ranked.slice(candidates.length)].sort(byCost)
+      // A carrier's price (which may include a return label) and your postage rates don't compare:
+      // packings it priced come first, then all the others (unpriced or not sent), each group by cost.
+      const rest = [...candidates.filter((p) => p.basis !== 'carrier'), ...ranked.slice(candidates.length)]
+      ranked = [...priced.sort(byCost), ...rest.sort(byCost)]
     } catch (error) {
       payload.logger.warn({ err: error, msg: 'kitting: carrier rates unavailable' })
       notes.push(`Rates unavailable from ${provider.name}; ranked by box cost and your postage rates.`)
