@@ -132,3 +132,19 @@ The first npm version comes only after the owner has tried Kitting by hand: owne
 
 - **Kitting settings.** These are a collection with one document per site, not a Payload global, because globals can't be per site. A site's settings override the plugin's config. The config values are only the starting point.
 - **Learned shrinkage.** It's shown on each supply's page, and only a person's click applies it, which keeps "the person decides".
+
+## 2026-11-10: decision feed acknowledged (ops/decisions/all.md, captive-origins.md)
+
+Settled decisions from the owner, through Helm's feed. The feed holds the owner's exact words.
+
+- **D1** Settled decisions arrive through the feed and are acted on, not re-argued.
+- **D2** Build it right: agnostic plugins with optional adapters, best architecture first. This repo imports no other Captive Origins plugin.
+- **D3** Owner steps and tests go to `~/Code/ops/inbox/` per `ops/rules/owner-items.md`, never straight to needs-you.md or tests.md.
+- **D4** Priority: Docker media, Minecraft server, then all Captive Origins.
+- **D5** No private repos to save CI minutes. This repo is public, with the Actions-minutes rules.
+- **D6, D21** Plugin names need the owner's OK before work starts (ops/plugin-names.md). Kitting predates the review and is on npm; it isn't in the Approved table.
+- **D7** No launch dates: work follows the priority list in ops/timeline-captive-origins.md. A freeze point is cut only when the owner says so.
+- **D8** Seed World hears about every collection-structure change ahead of time, with versions, and audits when it lands.
+- **D12** No plugin-family tags yet. None are in `package.json` keywords.
+- **D13** The activation QR goes on the kit bag only, never on the kit's box. Kitting's own label presets (built unit, supply lot, shelf) carry no activation, and the packing station prints whatever the provider's sets list; activation stays the provider's (Kits').
+- Not for this repo: D9 (PM doc), D10 (tour before studbook), D11 (kids decide on guardian suggestions), D14 (plan B), D15 (Husbandry.Pro link), D16 (both views).
