@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **`restockArrivals(payload, { req })`:** Restock's "Arrived, please confirm" orders for the Today line, now a tested function instead of code inside the admin view. It's empty for anyone who can't manage supplies (Restock isn't asked), and when Restock fails, Today still loads without that line and the error is logged. Before this, a Restock failure was swallowed with no log.
+
+Tested: 68 integration tests (1 new).
+
 ## 0.2.0 (2026-11-09)
 
 **Upgrading from 0.1.0:** there's one new collection, `kitting-settings` (one per site). If you use a tenant plugin, add it to your site-owned collections next to Kitting's others, and build its indexes before first use. Nothing else changes for existing data.

@@ -7,6 +7,7 @@ import type { CollectionSlug } from 'payload'
 import { recommendReadyStock } from '../build.js'
 import { AcceptBaseline } from '../client/AcceptBaseline.js'
 import { readyStatus, STATE_TEXT, type ReadyStatus } from '../readystock.js'
+import { restockArrivals } from '../restock.js'
 import { sendPendingAlerts, setupProgress, stockReport, suppliesOf, writeOffExpired, type StockRow } from '../stock.js'
 import type { Recommendation } from '../stocklevel.js'
 
@@ -76,8 +77,8 @@ export async function SuppliesView({ initPageResult, params, searchParams }: Adm
   }
   const setup = canManage ? await setupProgress(req.payload, { user: req.user }) : null
   // With Restock installed: deliveries waiting for someone to confirm (crossing kitting-restock). Never adds stock.
-  const restock = req.payload.config.custom?.restock as { arrived?: (args: { payload: typeof req.payload; user?: unknown }) => Promise<{ id: unknown; number: string; supplier: string }[]>; orders?: string } | undefined
-  const arrivals = canManage && restock?.arrived ? await restock.arrived({ payload: req.payload, user: req.user }).catch(() => []) : []
+  const restock = req.payload.config.custom?.restock as { orders?: string } | undefined
+  const arrivals = canManage ? await restockArrivals(req.payload, { req }) : []
   const toBuild = ready.filter((x) => x.status.state === 'build-more' || x.status.state === 'urgent')
   const waitingTotal = ready.reduce((t, x) => t + x.waiting, 0)
   const current = rows.filter((r) => !r.retired)

@@ -73,3 +73,27 @@ export async function restockNeeds(payload: Payload, options: { scope?: ID; req?
   }
   return out
 }
+
+/** A delivered order waiting for a person to confirm it, as Restock reports it. */
+export type RestockArrival = { id: unknown; number: string; supplier: string }
+
+/**
+ * Restock's "Arrived, please confirm" orders for Kitting's Today line (crossing `kitting-restock`).
+ * Read through `config.custom.restock`, so Kitting doesn't depend on Restock. Only for a signed-in
+ * person who may manage supplies; anyone else gets nothing, and Restock isn't asked. If Restock
+ * fails, the line is left out and the error logged: Today still loads. It never adds stock.
+ */
+export async function restockArrivals(payload: Payload, options: { req: Partial<import('payload').PayloadRequest> }): Promise<RestockArrival[]> {
+  const restock = payload.config.custom?.restock as { arrived?: (args: { payload: Payload; user?: unknown }) => Promise<RestockArrival[]> } | undefined
+  if (typeof restock?.arrived !== 'function') return []
+  const req = { ...options.req, payload } as import('payload').PayloadRequest
+  if (!req.user) return []
+  const o = suppliesOf(payload)
+  if (!(await o.manage({ req } as never))) return []
+  try {
+    return await restock.arrived({ payload, user: req.user })
+  } catch (error) {
+    payload.logger.error({ err: error, msg: 'kitting: Restock’s arrivals not shown' })
+    return []
+  }
+}

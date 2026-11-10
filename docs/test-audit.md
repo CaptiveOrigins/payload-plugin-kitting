@@ -99,3 +99,18 @@ Skipped: rendering the supply page's suggestion in tests, which needs the full a
 ## 2026-11-09, `restockNeeds` (crossing `kitting-restock`)
 
 67 tests. Added "what to buy, for Restock": it covers below-level and ready-stock needs, the larger of the two, the reason given, site isolation (another site's shortage never shows) and a site required. It's read-only, so there are no access paths to test: callers pass their own `req` and run with their own checks.
+
+## 2026-11-10, fifth audit (after 0.2.0)
+
+68 tests. Mapped the 0.2.0 CHANGELOG to the tests. Everything was covered except Restock's arrivals on Today, which lived inside the admin view.
+
+### Gap added (1 test, 1 fix)
+
+- **Access:** the arrivals line is only for people who may manage supplies. It's now `restockArrivals`, tested: nothing for a viewer or a signed-out person, and Restock isn't even asked; staff get the list, asked as themselves; no list without Restock.
+- **Fails closed, visibly:** if Restock throws, Today loads without the line. Before, the error was swallowed with no log; it's logged now.
+
+### Skipped, and why
+
+- **Site isolation of the arrivals:** Restock filters them by what the person may receive, and that's tested in Restock (`awaitingConfirmation` with a user). Kitting passes the person through unchanged, which the new test checks.
+- **Rendering the Today line:** needs the full admin, as before. It was checked in a browser on 2026-11-09.
+

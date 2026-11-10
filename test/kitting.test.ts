@@ -4,7 +4,7 @@ import { MongoMemoryReplSet } from 'mongodb-memory-server'
 import { buildConfig, getPayload, type Access, type CollectionConfig, type Field, type Payload } from 'payload'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
-import { applyRecipe, assignUnits, recommendBoxes, restockNeeds, setupProgress, siteShrinkage, stockCount, buildUnits, recommendReadyStock, release, shipUnits, swapUnit, kittingPlugin, KittingError, voidUnit, sendPendingAlerts, stockReport, suggestShrinkagePercent, writeOffExpired } from '../src/index.js'
+import { applyRecipe, assignUnits, recommendBoxes, restockArrivals, restockNeeds, setupProgress, siteShrinkage, stockCount, buildUnits, recommendReadyStock, release, shipUnits, swapUnit, kittingPlugin, KittingError, voidUnit, sendPendingAlerts, stockReport, suggestShrinkagePercent, writeOffExpired } from '../src/index.js'
 
 // Made-up data throughout: example.com addresses, invented supplies and sites.
 type Doc = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -941,5 +941,35 @@ describe('what to buy, for Restock', () => {
     expect(needs[1]!.why).toBe(`20 Need kit ${tag} to build need 60 each, 25 usable`)
     expect(needs[0]!.why).toBe('below its level (5 of 10 each)')
     await expect(restockNeeds(payload, {})).rejects.toThrow(/say which tenant/)
+  })
+})
+
+describe('Restock’s arrivals on Today', () => {
+  it('shows them only to people who may manage supplies, and survives Restock failing', async () => {
+    const custom = payload.config.custom as Record<string, unknown>
+    const before = custom.restock
+    const asked: unknown[] = []
+    const list = [{ id: 'po-1', number: 'PO-0001', supplier: 'Example Supply (made up)' }]
+    try {
+      // Without Restock there's nothing to show.
+      delete custom.restock
+      expect(await restockArrivals(payload, { req: { user: { ...staffA, collection: 'users' } as never } })).toEqual([])
+
+      custom.restock = { arrived: async ({ user }: { user?: unknown }) => (asked.push(user), list) }
+      // Signed out, or a viewer: nothing, and Restock isn't asked.
+      expect(await restockArrivals(payload, { req: {} })).toEqual([])
+      expect(await restockArrivals(payload, { req: { user: { ...viewerA, collection: 'users' } as never } })).toEqual([])
+      expect(asked).toEqual([])
+      // Staff see the list, asked as themselves.
+      expect(await restockArrivals(payload, { req: { user: { ...staffA, collection: 'users' } as never } })).toEqual(list)
+      expect((asked[0] as Doc).id).toBe(staffA.id)
+
+      // Restock failing leaves the line out instead of breaking Today.
+      custom.restock = { arrived: async () => { throw new Error('made-up failure') } }
+      expect(await restockArrivals(payload, { req: { user: { ...staffA, collection: 'users' } as never } })).toEqual([])
+    } finally {
+      if (before === undefined) delete custom.restock
+      else custom.restock = before
+    }
   })
 })
