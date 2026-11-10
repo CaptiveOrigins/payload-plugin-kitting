@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.1 (2026-11-10)
 
 - **`restockArrivals(payload, { req })`:** Restock's "Arrived, please confirm" orders for the Today line, now a tested function instead of code inside the admin view. It's empty for anyone who can't manage supplies (Restock isn't asked), and when Restock fails, Today still loads without that line and the error is logged. Before this, a Restock failure was swallowed with no log.
 
