@@ -182,6 +182,61 @@ export async function release(
 }
 
 /**
+ * Units just built for one order (`buildUnits`' `assignTo`, for building at packing), inside the build's
+ * transaction. Each unit fills the order's open build request if it has one; otherwise it takes the place of one
+ * of the order's assigned (not shipped) units, which goes back to ready, as `swapUnit` does. Units left over go
+ * to other requests as usual. Refuses with `nothingReserved` when the order holds nothing of the recipe, so a
+ * build can't quietly reserve stock for an order that doesn't want it. Returns the units it gave, and the leftovers.
+ */
+export async function assignBuilt(
+  payload: Payload,
+  req: Req,
+  recipe: Doc,
+  reference: string,
+  units: BuiltUnit[],
+): Promise<{ given: { unit: BuiltUnit; released: BuiltUnit | null; fromRequest: ID | null }[]; leftover: BuiltUnit[] }> {
+  const o = suppliesOf(payload)
+  const ref = String(reference ?? '').trim()
+  if (!ref) throw new KittingError('reference', 'Say which order this is for.')
+  const scope = o.scopeField ? idOf(recipe[o.scopeField]) : null
+  const held = await heldBy(payload, o, req, recipe, scope, ref)
+  if (!held.units.length && !held.queued) throw new KittingError('nothingReserved', `${ref} has no ${recipe.name} kept for it.`)
+  const now = new Date().toISOString()
+  const given: { unit: BuiltUnit; released: BuiltUnit | null; fromRequest: ID | null }[] = []
+  const queue = [...units]
+  // First, the order's waiting places.
+  let filled = held.request ? (num(held.request.filled) ?? 0) : 0
+  const fromRequest: ID[] = []
+  while (held.request && filled < (num(held.request.count) ?? 0) && queue.length) {
+    const unit = queue.shift()!
+    Object.assign(unit, toBuiltUnit(o, await setUnit(payload, o, req, unit.id, { status: 'assigned', assignedTo: ref, assignedAt: now })))
+    fromRequest.push(unit.id)
+    filled++
+    given.push({ unit, released: null, fromRequest: held.request.id as ID })
+  }
+  if (held.request && fromRequest.length)
+    await asInternal(req, {}, () =>
+      payload.update({
+        collection: o.requests as CollectionSlug,
+        id: held.request!.id,
+        data: { filled, status: filled >= (num(held.request!.count) ?? 0) ? 'filled' : 'open', units: [...((held.request!.units ?? []) as unknown[]).map(idOf), ...fromRequest] } as never,
+        ...sys,
+        req,
+      }),
+    )
+  // Then, in place of units already kept for it (newest kept first), which go back to ready.
+  const swappable = [...held.units].reverse().filter((u) => u.status === 'assigned')
+  while (queue.length && swappable.length) {
+    const unit = queue.shift()!
+    const out = swappable.shift()!
+    const released = toBuiltUnit(o, await setUnit(payload, o, req, out.id, { status: 'ready', assignedTo: null, assignedAt: null }))
+    Object.assign(unit, toBuiltUnit(o, await setUnit(payload, o, req, unit.id, { status: 'assigned', assignedTo: ref, assignedAt: now })))
+    given.push({ unit, released, fromRequest: null })
+  }
+  return { given, leftover: queue }
+}
+
+/**
  * Give freshly built units to open build requests for the same recipe, oldest request first. Runs
  * inside the build's transaction. Returns the units it assigned, with the request each went to.
  */

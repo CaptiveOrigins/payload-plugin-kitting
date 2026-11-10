@@ -10,6 +10,6 @@ Built as its own plugin, Restock (`@captiveorigins/payload-plugin-restock`, deci
 
 Turn sales at the till into usage, through recipes, so a café doesn't record what each drink used. One adapter per till system, each optional, read-only on the till's side.
 
-## 0.3.0: build straight into an order (agreed with Kits, 2026-11-10, after tour v3)
+## 0.3.0: build straight into an order (agreed with Kits, 2026-11-10; built 2026-11-10, unreleased)
 
 `buildUnits(payload, recipe, ids, { scope, req, assignTo: 'Order <id>' })`: units built at packing go to that reference first. They fill its open build request if it has one, otherwise they're assigned to it directly. The rest go to other requests as today. A reference that holds nothing and needs nothing is refused with `nothingReserved`. `onBuild` still runs first, in the same transaction. About half a day with tests. Kits uses it at its packing station (platform draft PR #88).

@@ -1,7 +1,7 @@
 import type { CollectionSlug, Payload, PayloadRequest, Where } from 'payload'
 
 import { asInternal, findRecipe, idOf, KittingError, num, planRecipe, round, sameID, sendPendingAlerts, suppliesOf, transaction, useNeeds } from './stock.js'
-import { fillRequests } from './fulfil.js'
+import { assignBuilt, fillRequests } from './fulfil.js'
 import { refreshStockStates } from './readystock.js'
 import { compareMethods, dailyDemand, settingsFromRecipe, type Recommendation } from './stocklevel.js'
 import type { BuildContext, BuildResult, BuiltUnit, ID, LotUse, RecipeRef, ResolvedSupplies } from './types.js'
@@ -117,7 +117,12 @@ export async function buildUnits(payload: Payload, recipe: RecipeRef, externalId
       if (o.onBuild) await o.onBuild({ payload, req, unit, recipe: { id: r.id, name: String(r.name), key: String(r.key) } })
       units.push(unit)
     }
-    const queued = context.fillRequests === false ? [] : await fillRequests(payload, req, r, units)
+    // Built at packing for one order: it gets these units first (fulfil.ts, assignBuilt).
+    const forOrder = context.assignTo !== undefined ? await assignBuilt(payload, req, r, context.assignTo, units) : null
+    const rest = forOrder ? forOrder.leftover : units
+    // Released units are ready again, so waiting requests can take them along with the leftovers.
+    const freed = forOrder ? forOrder.given.flatMap((g) => (g.released ? [g.released] : [])) : []
+    const queued = context.fillRequests === false ? [] : await fillRequests(payload, req, r, [...rest, ...freed])
     await refreshStockStates(payload, { req, scope })
     return {
       recipe: { id: r.id as ID, name: String(r.name) },
@@ -125,6 +130,7 @@ export async function buildUnits(payload: Payload, recipe: RecipeRef, externalId
       movements: used.movements,
       shortages: used.shortages,
       filled: queued.map((q) => ({ externalId: q.unit.externalId, request: q.request, reference: q.reference })),
+      assigned: (forOrder?.given ?? []).map((g) => ({ externalId: g.unit.externalId, reference: String(context.assignTo), released: g.released?.externalId ?? null, fromRequest: g.fromRequest })),
     }
   })
   if (!joined) await sendPendingAlerts(payload).catch((error) => payload.logger.error({ err: error, msg: 'kitting: low-stock alerts not sent' }))

@@ -223,6 +223,12 @@ export type BuildContext = {
   negativeStock?: NegativeStock
   /** Give the new units to waiting build requests, oldest first (default true). */
   fillRequests?: boolean
+  /**
+   * Built at packing for this order (its reference, for example "Order 1042"): the units go to it first. They
+   * fill its open build request, or take the place of units kept for it (those go back to ready). Refused with
+   * `nothingReserved` when the order holds nothing of the recipe. Leftovers go to other requests as usual.
+   */
+  assignTo?: string
 }
 
 export type BuildResult = {
@@ -232,6 +238,8 @@ export type BuildResult = {
   shortages: Shortage[]
   /** New units that went straight to a waiting build request. */
   filled: { externalId: string; request: ID; reference: string }[]
+  /** With `assignTo`: the units given to that order, each with the unit it replaced (now ready) or the request it filled. */
+  assigned: { externalId: string; reference: string; released: string | null; fromRequest: ID | null }[]
 }
 
 export type AssignContext = {

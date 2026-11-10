@@ -733,6 +733,34 @@ describe('fulfilment: assign, queue, swap, release', () => {
     await expect(create('build-requests', { tenant: siteA.id, reference: 'x', recipe: recipe.id, count: 1 }, as(staffA))).rejects.toThrow(/can’t be filled from ready stock/)
   })
 
+  it('builds at packing straight into one order: fills its queue, else swaps for a kept unit, and refuses an order holding nothing', async () => {
+    const { recipe, ids } = await stocked(1)
+    const order = `Order ${run()}`
+    const other = `Order ${run()}`
+    // The order holds ids[0] and waits for one more; another order waits for one too, and asked first.
+    await assignUnits(payload, { id: recipe.id }, 1, { reference: other, scope: siteA.id }) // takes ids[0]
+    await assignUnits(payload, { id: recipe.id }, 1, { reference: order, scope: siteA.id }) // queued
+    // Without assignTo the older request would win; with it, this order gets the new unit.
+    const first = `P1-${run()}`
+    const a = await buildUnits(payload, { id: recipe.id }, [first], { scope: siteA.id, assignTo: order })
+    expect(a.assigned).toEqual([{ externalId: first, reference: order, released: null, fromRequest: expect.anything() }])
+    expect(a.filled).toEqual([])
+    expect(await requestOf(order)).toMatchObject({ status: 'filled', filled: 1 })
+    // Nothing queued now: the next one built for it takes the kept unit's place, which then fills the other queue.
+    const second = `P2-${run()}`
+    const queuedOther = `Order ${run()}`
+    await assignUnits(payload, { id: recipe.id }, 1, { reference: queuedOther, scope: siteA.id }) // queued, no ready left
+    const b = await buildUnits(payload, { id: recipe.id }, [second], { scope: siteA.id, assignTo: order })
+    expect(b.assigned).toEqual([{ externalId: second, reference: order, released: first, fromRequest: null }])
+    expect(b.filled.map((f) => [f.externalId, f.reference])).toEqual([[first, queuedOther]])
+    const units = await unitsOf(recipe)
+    expect([units[second]!.assignedTo, units[first]!.assignedTo, units[ids[0]!]!.assignedTo]).toEqual([order, queuedOther, other])
+    // An order holding nothing of it: the whole build is refused and nothing is written.
+    const before = (await payload.count({ collection: 'assembled-units' as never, where: { recipe: { equals: recipe.id } } })).totalDocs
+    await expect(buildUnits(payload, { id: recipe.id }, [`P3-${run()}`], { scope: siteA.id, assignTo: `Nobody ${run()}` })).rejects.toMatchObject({ code: 'nothingReserved' })
+    expect((await payload.count({ collection: 'assembled-units' as never, where: { recipe: { equals: recipe.id } } })).totalDocs).toBe(before)
+  })
+
   it('keeps one site’s orders away from another’s units', async () => {
     const { recipe, ids } = await stocked(1)
     await expect(swapUnit(payload, { reference: 'B order', take: { externalId: ids[0]! }, scope: siteB.id })).rejects.toThrow(/hasn’t been built/)

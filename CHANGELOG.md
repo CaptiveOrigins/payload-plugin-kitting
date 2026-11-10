@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **Build at packing, straight into one order:** `buildUnits(payload, recipe, ids, { scope, assignTo: 'Order 1042' })`. The new units go to that order first. They fill its waiting build request, or take the place of units kept for it, which go back to ready and can fill other waiting requests. An order holding nothing of the recipe is refused with `nothingReserved`, and nothing is built. The result's `assigned` says which unit went where. Agreed with Kits for its packing station.
+
+Tested: 71 tests (1 new).
+
 ## 0.2.1 (2026-11-10)
 
 - **`restockArrivals(payload, { req })`:** Restock's "Arrived, please confirm" orders for the Today line, now a tested function instead of code inside the admin view. It's empty for anyone who can't manage supplies (Restock isn't asked), and when Restock fails, Today still loads without that line and the error is logged. Before this, a Restock failure was swallowed with no log.

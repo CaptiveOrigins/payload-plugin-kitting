@@ -129,3 +129,11 @@ Restock's move to Kitting 0.2.0 found that a scoped site which skips `kitting-se
 - **Startup goes ahead** when every collection has it, and when there's no scope field, and the host's `onInit` still runs.
 
 70 tests. Nothing skipped.
+
+## 2026-11-10, seventh audit: build at packing (`assignTo`)
+
+### Gap added (1 test)
+
+- `buildUnits` with `assignTo`: the order's waiting request beats an older request; with nothing waiting, it takes a kept unit's place, and the freed unit fills another waiting request; an order holding nothing is refused with `nothingReserved`, and nothing is written.
+
+71 tests. Nothing skipped.
