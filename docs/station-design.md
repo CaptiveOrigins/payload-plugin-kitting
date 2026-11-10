@@ -1,6 +1,6 @@
 # Packing station: design (draft, 2026-11-10)
 
-A packing screen in Kitting, one per order reference. You scan items in (building them on the spot if needed), see progress box by box, tick off packing steps, and ship. Whatever owns the orders, Kits on Captive Origins or any other site or plugin, plugs in as a **provider**, with no imports either way. Agreed in principle with Kits (code-91) on 2026-11-10, for after tour v3. Not built; nothing here is tested.
+A packing screen in Kitting, one per order reference. You scan items in (building them on the spot if needed), see progress box by box, tick off packing steps, and ship. Whatever owns the orders, Kits on Captive Origins or any other site or plugin, plugs in as a **provider**, with no imports either way. Agreed in principle with Kits (code-91) on 2026-11-10, for after tour v3; updated the same day with Kits' review (addItem and removeItem, idempotent afterAllScanned, kept state, read-only after Ship, phone width). Not built; nothing here is tested.
 
 ## What Kitting owns
 
@@ -23,9 +23,18 @@ type StationProvider = {
   canOpen: (args: { user: unknown; reference: string; req }) => Promise<boolean>
   /** Which items go in which box, and each box's type. */
   boxPlan: (args: { reference: string; req }) => Promise<{ boxes: { number: number; boxType: { id: ID; name: string; packagingRecipeKey?: string }; items: number }[] }>
-  /** Each scan, before Kitting moves anything. The message is in plain words and already translated; Kitting shows it as it is. */
-  validateItem: (args: { code: string; reference: string; req }) => Promise<{ ok: true; box?: number } | { ok: false; code: 'recalled' | 'used' | 'surplus' | 'wrongOrder' | string; message: string }>
-  /** When every planned item is in. For example, Kits issues activation secrets here. */
+  /**
+   * Each scan, inside the scan's transaction: check the item and record it on the provider's side (for example,
+   * Kits marks the kit packed for this order, in a box). A refusal writes nothing. The message is in plain words
+   * and already translated; Kitting shows it as it is.
+   */
+  addItem: (args: { code: string; reference: string; req }) => Promise<{ ok: true; box?: number } | { ok: false; code: 'recalled' | 'used' | 'surplus' | 'wrongOrder' | string; message: string }>
+  /** Unscan, in the same transaction as Kitting's release: the provider takes the item off the order. */
+  removeItem: (args: { code: string; reference: string; req }) => Promise<void>
+  /**
+   * When every planned item is in. Must be idempotent: it can run again after an unscan and a rescan. For
+   * example, Kits issues secrets only to kits that have none, and drops the secret of a kit that left the order.
+   */
   afterAllScanned?: (args: { reference: string; req }) => Promise<void>
   /** Labels sets to offer on the screen. Only shown when the Labels plugin is present. */
   printSets?: (args: { reference: string; req }) => Promise<{ key: string; name: string }[]>
@@ -36,9 +45,14 @@ type StationProvider = {
 
 Rules:
 
-- **Every call gets `{ req }` and runs inside Kitting's transaction.** A scan is one transaction: `validateItem`, the build if needed, and the unit swap. Shipping is another: `shipUnits`, `applyRecipe` per box, then `onShipped`. If any part throws, all of it rolls back. Alerts and emails go out after the commit.
+- **Every call gets `{ req }` and runs inside Kitting's transaction.** A scan is one transaction: `addItem`, the build if needed, and the unit swap. An unscan is another: `removeItem` and the release. Shipping is another: `shipUnits`, `applyRecipe` per box, then `onShipped`. If any part throws, all of it rolls back. Alerts and emails go out after the commit.
 - **Access fails closed.** The view and every action check Kitting's own `manage` access, then `canOpen`. If either is false or throws, the answer is the same "not found or not allowed" refusal.
-- **Refusals are shown as given.** `validateItem`'s `code` is stable, so tests can check it, and its `message` is shown as written. A refusal moves nothing.
+- **Refusals are shown as given.** `addItem`'s `code` is stable, so tests can check it, and its `message` is shown as written. A refusal writes nothing on either side.
+- **Tracking stays the provider's.** Kitting passes `tracking` only if someone types it; the provider reads its own labels otherwise.
+
+## What's kept
+
+A small Kitting collection, `packing-sessions`, holds one record per reference (and site): the ticked packing steps per box, who ticked them and when, and, once shipped, `shippedAt` and `shippedBy`. A reload or a second device shows the same state. After Ship the station is read-only ("Shipped on <date>"), with no scanning. The scanned items themselves aren't copied there: they're the units assigned to the reference, and the provider's own records.
 
 ## The screen
 
@@ -47,6 +61,7 @@ Rules:
 - A scan field that always has focus after each action. Each result is announced to screen readers through a polite live region ("Kit 1234… in box 2"). A refusal is shown in red text with its message, and in words as well as color.
 - Every action has a keyboard path. Unscan is a button on each item, and Ship is enabled only when every item is in and every step is ticked.
 - With the scan plugin present, a "Use camera" button opens it, and its result goes into the same field.
+- **Works on a phone** at 375px wide, for the camera case: the box cards stack, the scan field and the camera button stay at the top, and every target is at least 44px. A browser check at that width is part of the tests.
 
 ## Rough time
 
@@ -54,10 +69,10 @@ These are guesses of session days, not promises.
 
 | Piece | Days |
 | --- | --- |
-| Provider contract, server actions in transactions, access | 1.5 |
-| Station view: picker, box cards, steps, live region, keyboard | 2–3 |
+| Provider contract, server actions in transactions, access, `packing-sessions` | 2 |
+| Station view: picker, box cards, steps, live region, keyboard, phone width, read-only after Ship | 2.5–3 |
 | Tests (each refusal code, rollback on a failing provider call, access) and a browser check with made-up data | 1–1.5 |
-| Total | about 5–6 |
+| Total | about 6 |
 
 This depends on Kitting 0.3.0 (`assignTo`, half a day), which comes first.
 
