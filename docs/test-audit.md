@@ -118,3 +118,14 @@ Skipped: rendering the supply page's suggestion in tests, which needs the full a
 
 Kits' shipping provider (draft platform PR #61) prices a box as outbound plus one return label, and returns no rates without a key or a destination. Before this, a carrier that priced only some packings was ranked in one list with packings priced from postage rates, so a partly priced packing could look cheaper than it was. The box suggestion test now covers a carrier that prices some boxes (carrier-priced packings first, with a note) and one that prices none (postage rates, with its reason).
 
+
+## 2026-11-10, sixth audit: the scope field check
+
+Restock's move to Kitting 0.2.0 found that a scoped site which skips `kitting-settings` in its tenant plugin gets "the following path cannot be queried: tenant" from the first stock report. That's an access rule (sites must never mix), so it's checked in code now.
+
+### Gap added (2 tests, 1 fix)
+
+- **Startup stops** when a Kitting collection lacks the scope field, naming each one, before the host's own `onInit` (`test/scope.test.ts`).
+- **Startup goes ahead** when every collection has it, and when there's no scope field, and the host's `onInit` still runs.
+
+70 tests. Nothing skipped.

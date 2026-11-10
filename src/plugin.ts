@@ -75,6 +75,21 @@ export const kittingPlugin =
     const components = config.admin?.components ?? {}
     return {
       ...config,
+      // With a scope field, every Kitting collection must have it once all plugins have run (a tenant
+      // plugin usually adds it). One without it would fail every scoped query or mix sites' records,
+      // so startup stops and says which collections and how to fix it.
+      onInit: async (payload) => {
+        if (o.scopeField) {
+          const missing = added
+            .map((c) => c.slug)
+            .filter((slug) => !(payload.collections[slug as never]?.config.flattenedFields ?? []).some((f) => 'name' in f && f.name === o.scopeField))
+          if (missing.length)
+            throw new Error(
+              `Kitting: scopeField is "${o.scopeField}", but ${missing.join(', ')} ${missing.length > 1 ? 'have' : 'has'} no "${o.scopeField}" field. Add ${missing.length > 1 ? 'them' : 'it'} to your tenant plugin's collections, or add the field with Kitting's \`overrides\`.`,
+            )
+        }
+        await config.onInit?.(payload)
+      },
       custom: { ...config.custom, kitting: o },
       collections: [...withEcommerce(o, config.collections ?? []), ...added],
       endpoints: [...(config.endpoints ?? []), ...kittingEndpoints],

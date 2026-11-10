@@ -6,7 +6,9 @@
 
 - **Box suggestions with a carrier that prices only some boxes:** packings it priced now come first, then the rest, each by cost, with a note. A carrier's price (which may include a return label) and your postage rates aren't comparable, so they're no longer ranked in one list. A carrier that gives no rates at all now says so plainly, instead of asking whether box sizes are set.
 
-Tested: 68 integration tests (1 new, 1 extended).
+- **A missing scope field stops startup, with a plain message.** With `scopeField` set, every Kitting collection must have that field once all plugins have run. One without it (for example `kitting-settings` left out of a tenant plugin after upgrading to 0.2) used to fail later with "the following path cannot be queried". Now startup stops and says which collections and how to fix it, before your own `onInit` runs.
+
+Tested: 70 tests (3 new, 1 extended).
 
 ## 0.2.0 (2026-11-09)
 
