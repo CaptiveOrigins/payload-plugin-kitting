@@ -10,7 +10,9 @@
 
 - **A failing rate provider is visible now.** Kitting still falls back to your postage rates, so packing is never blocked, but it returns `fallback: { provider, error }`, ends each summary with "(your postage rates: … unavailable)", and logs the error's name once per provider. A provider that hands back no `rates` list counts as failing. A `shipping.provider` without `quoteRates` now stops startup with a message pointing to the adapter; one registered by another plugin gets a startup warning instead.
 
-Tested: 83 tests (13 new, 1 extended). Not tested: Shipping's real `quote` against EasyPost (a made-up function of its shape was used; its type was checked against Shipping's source).
+- **Restock's arrivals for staff who manage only some sites.** Today's "Arrived, please confirm" line now shows every site's deliveries only when `manage` answers exactly `true`. For a query that names nothing but sites (the scope field with `equals` or `in` on site IDs, alone or under `and`/`or`, as the multi-tenant plugin's access does), it shows only those sites' deliveries, matched against the site Restock returns with each order. Any other answer, a query Kitting can't read as a list of sites included, shows nothing and Restock isn't asked; so does an order without a site. Before, a site query showed every site's deliveries (0.2.1), and then, briefly on main, nothing at all. Needs the next Restock release, whose `arrived` returns `scope`; with Restock 0.1.x, site-limited staff see nothing.
+
+Tested: 89 tests (19 new, 2 extended). Not tested: Shipping's real `quote` against EasyPost (a made-up function of its shape was used; its type was checked against Shipping's source), and the arrivals line in a real admin with both plugins installed (Restock's `arrived` was made up in Kitting's tests; its real output is tested in Restock).
 
 ## 0.2.1 (2026-11-10)
 

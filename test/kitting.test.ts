@@ -1066,11 +1066,14 @@ describe('what to buy, for Restock', () => {
 })
 
 describe('Restock’s arrivals on Today', () => {
-  it('shows them only to people who manage every site (an exact true), and survives Restock failing', async () => {
+  it('shows every site’s to people who manage every site (an exact true), and survives Restock failing', async () => {
     const custom = payload.config.custom as Record<string, unknown>
     const before = custom.restock
     const asked: unknown[] = []
-    const list = [{ id: 'po-1', number: 'PO-0001', supplier: 'Example Supply (made up)' }]
+    const list = [
+      { id: 'po-1', number: 'PO-0001', supplier: 'Example Supply (made up)', scope: String(siteA.id) },
+      { id: 'po-2', number: 'PO-0002', supplier: 'Example Supply (made up)', scope: String(siteB.id) },
+    ]
     try {
       // Without Restock there's nothing to show.
       delete custom.restock
@@ -1081,10 +1084,7 @@ describe('Restock’s arrivals on Today', () => {
       expect(await restockArrivals(payload, { req: {} })).toEqual([])
       expect(await restockArrivals(payload, { req: { user: { ...viewerA, collection: 'users' } as never } })).toEqual([])
       expect(asked).toEqual([])
-      // Staff limited to their sites by a query: nothing, since the query can't be applied to Restock's orders.
-      expect(await restockArrivals(payload, { req: { user: { ...staffA, collection: 'users' } as never } })).toEqual([])
-      expect(asked).toEqual([])
-      // Someone who manages every site (an exact true) sees the list, asked as themselves.
+      // Someone who manages every site (an exact true) sees the whole list, asked as themselves.
       const lead = await create('users', { email: `lead-${Math.random().toString(36).slice(2, 7)}@example.com`, password: 'a-long-test-password', role: 'admin', tenants: [] })
       expect(await restockArrivals(payload, { req: { user: { ...lead, collection: 'users' } as never } })).toEqual(list)
       expect((asked[0] as Doc).id).toBe(lead.id)
@@ -1105,8 +1105,71 @@ describe('Restock’s arrivals on Today', () => {
 
       // Restock failing leaves the line out instead of breaking Today.
       custom.restock = { arrived: async () => { throw new Error('made-up failure') } }
-      expect(await restockArrivals(payload, { req: { user: { ...staffA, collection: 'users' } as never } })).toEqual([])
+      expect(await restockArrivals(payload, { req: { user: { ...lead, collection: 'users' } as never } })).toEqual([])
     } finally {
+      if (before === undefined) delete custom.restock
+      else custom.restock = before
+    }
+  })
+
+  it('shows staff limited to some sites only those sites’ orders, and nothing for a query it can’t read as sites', async () => {
+    const custom = payload.config.custom as Record<string, unknown>
+    const before = custom.restock
+    const asked: unknown[] = []
+    const [a, b] = [String(siteA.id), String(siteB.id)]
+    const list = [
+      { id: 'po-a', number: 'PO-A', supplier: 'Example Supply (made up)', scope: a },
+      { id: 'po-b', number: 'PO-B', supplier: 'Example Supply (made up)', scope: b },
+      { id: 'po-a2', number: 'PO-A2', supplier: 'Example Supply (made up)', scope: { id: a } }, // a populated site
+      { id: 'po-none', number: 'PO-NONE', supplier: 'Example Supply (made up)', scope: null }, // no site
+      { id: 'po-old', number: 'PO-OLD', supplier: 'Example Supply (made up)' }, // an older Restock, no scope at all
+      { id: 'po-odd', number: 'PO-ODD', supplier: 'Example Supply (made up)', scope: { id: { id: a } } }, // not an ID
+    ]
+    const numbers = (r: { number: string }[]) => r.map((x) => x.number)
+    const o = payload.config.custom!.kitting as { manage: unknown }
+    const manage = o.manage
+    try {
+      custom.restock = { arrived: async ({ user }: { user?: unknown }) => (asked.push(user), list) }
+      // The host's own access (`{ tenant: { in: [their sites] } }`): site A's staff see site A's, site B's see B's.
+      expect(numbers(await restockArrivals(payload, { req: { user: { ...staffA, collection: 'users' } as never } }))).toEqual(['PO-A', 'PO-A2'])
+      expect(numbers(await restockArrivals(payload, { req: { user: { ...staffB, collection: 'users' } as never } }))).toEqual(['PO-B'])
+      expect((asked[0] as Doc).id).toBe(staffA.id)
+
+      const shown = async (answer: unknown) => {
+        o.manage = () => answer
+        asked.length = 0
+        return numbers(await restockArrivals(payload, { req: { user: { ...staffA, collection: 'users' } as never } }))
+      }
+      // Queries it can read as a list of sites.
+      expect(await shown({ tenant: { equals: a } })).toEqual(['PO-A', 'PO-A2'])
+      expect(await shown({ tenant: { in: [a, b] } })).toEqual(['PO-A', 'PO-B', 'PO-A2'])
+      expect(await shown({ tenant: { in: [] } })).toEqual([])
+      expect(await shown({ and: [{ tenant: { in: [a, b] } }, { tenant: { equals: b } }] })).toEqual(['PO-B'])
+      expect(await shown({ or: [{ tenant: { equals: a } }, { tenant: { equals: b } }] })).toEqual(['PO-A', 'PO-B', 'PO-A2'])
+      // An order without a usable site never matches, even a site whose ID reads like the missing value.
+      expect(await shown({ tenant: { in: ['null', 'undefined', '[object Object]'] } })).toEqual([])
+      // Anything else: nothing, and Restock isn't asked.
+      for (const answer of [
+        { tenant: { not_equals: b } },
+        { tenant: { not_in: [b] } },
+        { tenant: { exists: true } },
+        { tenant: { equals: a, not_equals: b } },
+        { tenant: { equals: null } },
+        { tenant: { equals: { id: a } } },
+        { tenant: { in: [a, null] } },
+        { tenant: { in: a } },
+        { 'tenant.id': { equals: a } },
+        { site: { equals: a } },
+        { owner: { equals: staffA.id } },
+        { and: [{ tenant: { equals: a } }, { active: { equals: true } }] },
+        { or: [{ tenant: { equals: a } }, { owner: { equals: staffA.id } }] },
+        { tenant: { equals: a }, owner: { equals: staffA.id } },
+      ]) {
+        expect(await shown(answer), JSON.stringify(answer)).toEqual([])
+        expect(asked).toEqual([])
+      }
+    } finally {
+      o.manage = manage
       if (before === undefined) delete custom.restock
       else custom.restock = before
     }

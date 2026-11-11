@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { sitesAllowed } from '../src/access.js'
 import { allocate, describeUse, isExpired, shrinkagePercent } from '../src/stock.js'
 import { conversionFactor, normalizeUnit, unitsFor } from '../src/units.js'
 
@@ -75,5 +76,35 @@ describe('plugin set-up', () => {
     const config = { collections: [{ slug: 'box-types', fields: [] }] } as never
     expect(() => kittingPlugin()(config)).toThrow(/box-types already exists in this config\. Give Kitting other slugs/)
     expect(() => kittingPlugin({ slugs: { boxes: 'kitting-boxes' } })(config)).not.toThrow()
+  })
+})
+
+describe('reading an access query as a list of sites (for Restock’s arrivals)', () => {
+  const sites = (w: unknown) => {
+    const out = sitesAllowed(w, 'tenant')
+    return out === null ? null : [...out].sort()
+  }
+  it('reads the scope field with equals or in, and and/or of those', () => {
+    expect(sites({ tenant: { equals: 'site-a' } })).toEqual(['site-a'])
+    expect(sites({ tenant: { equals: 7 } })).toEqual(['7'])
+    expect(sites({ tenant: { in: ['site-a', 'site-b'] } })).toEqual(['site-a', 'site-b'])
+    expect(sites({ tenant: { in: [] } })).toEqual([])
+    expect(sites({ and: [{ tenant: { in: ['site-a', 'site-b'] } }, { tenant: { equals: 'site-b' } }] })).toEqual(['site-b'])
+    expect(sites({ or: [{ tenant: { equals: 'site-a' } }, { tenant: { in: ['site-c'] } }] })).toEqual(['site-a', 'site-c'])
+    // Several keys in one object must all hold.
+    expect(sites({ tenant: { in: ['site-a', 'site-b'] }, and: [{ tenant: { equals: 'site-b' } }] })).toEqual(['site-b'])
+  })
+  it('is null (show nothing) for anything else', () => {
+    for (const w of [
+      null, undefined, true, 1, 'site-a', {}, { tenant: false }, { tenant: {} }, { and: [] }, { and: [{}] },
+      { tenant: { equals: null } }, { tenant: { equals: '' } }, { tenant: { equals: { id: 'site-a' } } }, { tenant: { equals: Number.NaN } },
+      { tenant: { in: 'site-a' } }, { tenant: { in: ['site-a', null] } }, { tenant: { in: [{ id: 'site-a' }] } },
+      { tenant: { not_equals: 'site-b' } }, { tenant: { not_in: ['site-b'] } }, { tenant: { exists: true } }, { tenant: { like: 'site' } },
+      { tenant: { equals: 'site-a', not_equals: 'site-b' } }, { site: { equals: 'site-a' } }, { 'tenant.id': { equals: 'site-a' } },
+      { and: [{ tenant: { equals: 'site-a' } }, { active: { equals: true } }] }, { or: [{ tenant: { equals: 'site-a' } }, { owner: { equals: 'u1' } }] },
+    ])
+      expect(sites(w), JSON.stringify(w)).toBeNull()
+    // Without a scope field, no query can be about sites.
+    expect(sitesAllowed({ tenant: { equals: 'site-a' } }, undefined)).toBeNull()
   })
 })

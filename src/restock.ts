@@ -1,6 +1,6 @@
 import type { CollectionSlug, Payload, Where } from 'payload'
 
-import { exactlyTrue } from './access.js'
+import { sitesAllowed, trueOrWhere } from './access.js'
 import { readyStatus } from './readystock.js'
 import { idOf, planRecipe, round, sameID, stockReport, suppliesOf } from './stock.js'
 import type { ID } from './types.js'
@@ -75,15 +75,16 @@ export async function restockNeeds(payload: Payload, options: { scope?: ID; req?
   return out
 }
 
-/** A delivered order waiting for a person to confirm it, as Restock reports it. */
-export type RestockArrival = { id: unknown; number: string; supplier: string }
+/** A delivered order waiting for a person to confirm it, as Restock reports it. `scope` is the order's site, from Restock 0.2 on. */
+export type RestockArrival = { id: unknown; number: string; supplier: string; scope?: unknown }
 
 /**
  * Restock's "Arrived, please confirm" orders for Kitting's Today line (crossing `kitting-restock`).
- * Read through `config.custom.restock`, so Kitting doesn't depend on Restock. Only for a signed-in
- * person whose `manage` answers exactly `true` (every site); anyone else, staff limited to some sites by a
- * query included, gets nothing, and Restock isn't asked. If Restock
- * fails, the line is left out and the error logged: Today still loads. It never adds stock.
+ * Read through `config.custom.restock`, so Kitting doesn't depend on Restock. Only for a signed-in person whose
+ * `manage` answers exactly `true` (every site), or a query that names only sites (the scope field with `equals` or
+ * `in`, see `sitesAllowed`): they get the orders whose `scope` is one of those sites. Any other answer, a query Kitting
+ * can't read that way included, gets nothing, and Restock isn't asked. If Restock fails, the line is left out and the
+ * error logged: Today still loads. It never adds stock.
  */
 export async function restockArrivals(payload: Payload, options: { req: Partial<import('payload').PayloadRequest> }): Promise<RestockArrival[]> {
   const restock = payload.config.custom?.restock as { arrived?: (args: { payload: Payload; user?: unknown }) => Promise<RestockArrival[]> } | undefined
@@ -91,11 +92,19 @@ export async function restockArrivals(payload: Payload, options: { req: Partial<
   const req = { ...options.req, payload } as import('payload').PayloadRequest
   if (!req.user) return []
   const o = suppliesOf(payload)
-  // Only an exact `true`. A query (staff limited to some sites) can't be applied to Restock's orders from here, so
-  // it's a no rather than every site's deliveries; so is any other truthy answer, or a thrown error.
-  if (!(await exactlyTrue(() => o.manage({ req } as never)))) return []
+  const access = await trueOrWhere(() => o.manage({ req } as never))
+  // A query is applied here, to each order's site. One Kitting can't read as a list of sites is a no rather than
+  // every site's deliveries; so is any other truthy answer, or a thrown error.
+  const sites = access === true ? null : sitesAllowed(access, o.scopeField)
+  if (access !== true && sites === null) return []
   try {
-    return await restock.arrived({ payload, user: req.user })
+    const list = await restock.arrived({ payload, user: req.user })
+    if (sites === null) return list
+    // An order without a site (an older Restock, or one without a scope field) can't be placed, so it's left out.
+    return list.filter((a) => {
+      const site = idOf(a.scope)
+      return (typeof site === 'string' || typeof site === 'number') && sites.has(String(site))
+    })
   } catch (error) {
     payload.logger.error({ err: error, msg: 'kitting: Restock’s arrivals not shown' })
     return []

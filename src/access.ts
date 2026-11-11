@@ -1,18 +1,6 @@
 import type { Where } from 'payload'
 import { validOperatorSet } from 'payload/shared'
 
-/**
- * Only an answer of exactly `true` passes. Anything else is a no: `false`, a truthy value such as `1`, `'yes'` or a
- * query, and an error thrown or rejected (so a broken check is a refusal, never a crash).
- */
-export async function exactlyTrue(check: () => unknown): Promise<boolean> {
-  try {
-    return (await check()) === true
-  } catch {
-    return false
-  }
-}
-
 const plain = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length > 0
 
 /**
@@ -46,3 +34,34 @@ export async function trueOrWhere(check: () => unknown): Promise<true | Where | 
 
 /** For an admin view whose reads all apply the person's access: `true` or a query lets them in, anything else doesn't. */
 export const mayUse = async (check: () => unknown): Promise<boolean> => (await trueOrWhere(check)) !== false
+
+const siteID = (v: unknown): v is string | number => (typeof v === 'string' && v !== '') || (typeof v === 'number' && Number.isFinite(v))
+
+/**
+ * The sites a query allows, when it says nothing but which sites: `{ [scopeField]: { equals: id } }` or
+ * `{ [scopeField]: { in: [ids] } }`, alone or combined with `and` (sites in every part) or `or` (sites in any part).
+ * Anything else, another field or operator, an object or empty value, or no `scopeField` at all, is `null`: the
+ * caller can't tell which rows it allows and must show none.
+ */
+export function sitesAllowed(where: unknown, scopeField: string | undefined): Set<string> | null {
+  if (!isWhere(where)) return null
+  const parts: (Set<string> | null)[] = []
+  for (const [key, value] of Object.entries(where)) {
+    if (key === 'and' || key === 'or') {
+      const sets = (value as unknown[]).map((w) => sitesAllowed(w, scopeField))
+      if (sets.some((x) => x === null)) return null
+      const all = sets as Set<string>[]
+      parts.push(key === 'or' ? new Set(all.flatMap((x) => [...x])) : new Set([...all[0]!].filter((id) => all.every((x) => x.has(id)))))
+      continue
+    }
+    if (key !== scopeField) return null
+    const ops = Object.entries(value as Record<string, unknown>)
+    if (ops.length !== 1) return null
+    const [op, arg] = ops[0]!
+    if (op === 'equals' && siteID(arg)) parts.push(new Set([String(arg)]))
+    else if (op === 'in' && Array.isArray(arg) && arg.every(siteID)) parts.push(new Set(arg.map(String)))
+    else return null
+  }
+  // Several keys in one object are all required, as Payload reads them.
+  return new Set([...parts[0]!].filter((id) => parts.every((x) => x!.has(id))))
+}

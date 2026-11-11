@@ -1,10 +1,11 @@
 import { mongooseAdapter } from '@payloadcms/db-mongodb'
 import { multiTenantPlugin } from '@payloadcms/plugin-multi-tenant'
+import { getTenantAccess } from '@payloadcms/plugin-multi-tenant/utilities'
 import { MongoMemoryReplSet } from 'mongodb-memory-server'
-import { buildConfig, getPayload, type Payload, type Plugin } from 'payload'
+import { buildConfig, getPayload, type Access, type Payload, type Plugin } from 'payload'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { applyRecipe, assignUnits, buildUnits, kittingPlugin, swapUnit } from '../src/index.js'
+import { applyRecipe, assignUnits, buildUnits, kittingPlugin, restockArrivals, swapUnit } from '../src/index.js'
 
 // Kitting's scope field with Payload's real multi-tenant plugin adding `tenant`, not a field added by
 // hand with `overrides`. Made-up sites, supplies and example.com users; each config has its own database.
@@ -17,8 +18,8 @@ const started: Payload[] = []
 const run = () => Math.random().toString(36).slice(2, 8).toUpperCase()
 
 /** A host with Kitting and the tenant plugin. The tenant plugin goes last, as its docs ask, unless `tenantFirst`. */
-async function start(key: string, tenantCollections: string[], tenantFirst = false) {
-  const kitting = kittingPlugin({ scopeField: 'tenant' })
+async function start(key: string, tenantCollections: string[], tenantFirst = false, manage?: Access) {
+  const kitting = kittingPlugin({ scopeField: 'tenant', ...(manage ? { access: { manage } } : {}) })
   const tenants = multiTenantPlugin({
     collections: Object.fromEntries(tenantCollections.map((slug) => [slug, {}])),
     userHasAccessToAllTenants: (user) => (user as Doc).role === 'admin',
@@ -186,4 +187,31 @@ describe('Kitting under the multi-tenant plugin', () => {
     await expect(swapUnit(payload, { reference: 'A order', take: { externalId: bUnit!.externalId }, scope: siteA.id })).rejects.toThrow(/hasn’t been built/)
     expect((await get('supply-items', b.swab.id)).onHand).toBe(19)
   })
+})
+
+describe('Restock’s arrivals on Today, with the tenant plugin’s own access', () => {
+  it('shows site A’s staff site A’s deliveries and not site B’s, using the query the tenant plugin builds', async () => {
+    // Kitting's manage is the tenant plugin's own helper: admins every site, staff `{ tenant: { in: [their sites] } }`.
+    const manage: Access = ({ req }) => (req.user ? ((req.user as Doc).role === 'admin' ? true : getTenantAccess({ fieldName: 'tenant', user: req.user as never })) : false)
+    const payload = await start('arrivals', KITTING, false, manage)
+    const create = (collection: string, data: Doc) => payload.create({ collection: collection as never, data: data as never, depth: 0 }) as Promise<Doc>
+    const siteA = await create('tenants', { name: 'Site A' })
+    const siteB = await create('tenants', { name: 'Site B' })
+    const user = (email: string, role: string, sites: Doc[]) => create('users', { email, password: 'a-long-test-password', role, tenants: sites.map((s) => ({ tenant: s.id })) })
+    const staffA = await user('arrivals-a@example.com', 'staff', [siteA])
+    const both = await user('arrivals-ab@example.com', 'staff', [siteA, siteB])
+    const nobody = await user('arrivals-none@example.com', 'staff', [])
+    const admin = await user('arrivals-admin@example.com', 'admin', [])
+    // A made-up Restock, shaped like its `arrived`: each order with its site's ID.
+    const list = [
+      { id: 'po-a', number: 'PO-A', supplier: 'Example Supply (made up)', deliveredAt: '2026-11-10T09:00:00.000Z', scope: siteA.id },
+      { id: 'po-b', number: 'PO-B', supplier: 'Example Supply (made up)', deliveredAt: '2026-11-10T10:00:00.000Z', scope: siteB.id },
+    ]
+    ;(payload.config.custom as Doc).restock = { arrived: async () => list }
+    const shown = async (u: Doc) => (await restockArrivals(payload, { req: { user: { ...u, collection: 'users' } as never } })).map((a) => a.number)
+    expect(await shown(staffA)).toEqual(['PO-A'])
+    expect(await shown(both)).toEqual(['PO-A', 'PO-B'])
+    expect(await shown(nobody)).toEqual([])
+    expect(await shown(admin)).toEqual(['PO-A', 'PO-B'])
+  }, 180_000)
 })
