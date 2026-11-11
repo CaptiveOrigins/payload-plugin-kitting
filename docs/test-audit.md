@@ -169,3 +169,29 @@ Since the fifth audit: the scope field check (9662ca0), `buildUnits`' `assignTo`
 - **Docs-only commits:** nothing to test.
 
 Lead's follow-up (2026-11-10): the bug above is fixed. `assignTo` counts only units still kept, not shipped ones, as `swapUnit` does. The assignTo test now covers an order whose units have all shipped, and putting the old check back fails it.
+
+## 2026-11-10: scope check with Payload's multi-tenant plugin (K443)
+
+The eighth audit left this untried: every scope test added `tenant` by hand with `overrides`. `test/multi-tenant.test.ts` runs Kitting with `@payloadcms/plugin-multi-tenant` 3.92.1 (a devDependency, at the same version as `payload`) adding the field, on its own in-memory MongoDB databases. Kitting goes first in `plugins`, the tenant plugin second, as the tenant plugin asks.
+
+### Gap added (7 tests)
+
+- **Startup refuses** when one Kitting collection (`kitting-settings`) is left out of the tenant plugin's `collections`, with Kitting's message naming it.
+- **Startup refuses** when the tenant plugin runs before Kitting. Payload's own config check stops it first, with "Field tenant was not found" (the units' unique `externalId` + `tenant` index), so Kitting's message never shows. The tenant plugin logs a warning naming every Kitting collection it couldn't find. It still fails closed.
+- **Startup goes ahead** with every Kitting collection listed, and each has the tenant plugin's own field: a single relationship to `tenants`, indexed.
+- **Per-site rules through the real field:** a recipe or item can't use another site's supply or supplier; recipe keys are unique per site; `applyRecipe` refuses another site's recipe.
+- **A movement takes its supply's site,** when given none, when given the wrong one, and when written by staff with `overrideAccess: false`.
+- **`assignUnits` and `buildUnits` with `assignTo` stay inside one site:** site B keeps a unit for an order; site A's order of the same name holds nothing, so building into it is refused with `nothingReserved` and writes no unit or movement. Site A's own queued order is filled on site A, and the same external ID can be used once on each site.
+- **With the tenant plugin's access, Kitting's default access and `overrideAccess: false`:** site A's staff see only site A's items, suppliers, movements, recipes, units and build requests, and site B's staff only B's. Site A's staff can't read B's rows by ID, create a recipe on B, record a movement on B's supply, or rename B's supply, and B's stock is unchanged. Kitting's functions refuse B's recipe for site A (`applyRecipe`, `buildUnits`), and don't find B's recipe key or unit from site A.
+
+79 tests.
+
+### Found (no bug)
+
+- The tenant plugin's field isn't `required`; its own `validate` refuses an empty value. Kitting sets a movement's and a lot's site in `beforeChange`, which runs before field validation, so that works.
+- With Kitting's default `access` (any signed-in user), Kitting's own "can manage this supply" check passes for another site's supply, because it reads Kitting's `access.manage`, not the tenant plugin's wrapped access. The tenant plugin is what refuses the movement: Kitting gives it the supply's site, and the tenant field rejects a site the user isn't in. That matches the README ("keeping each site's records to its own site is your tenant plugin's job"), and the test now proves it.
+
+### Skipped, and why
+
+- **The admin panel's tenant selector and cookie:** UI, outside the Local API. It belongs with the platform check in a real host.
+- **The tenant plugin's own internals** (its users array, tenant clean-up on delete): its tests, not Kitting's.

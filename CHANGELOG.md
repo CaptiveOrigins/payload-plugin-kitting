@@ -4,7 +4,9 @@
 
 - **Build at packing, straight into one order:** `buildUnits(payload, recipe, ids, { scope, assignTo: 'Order 1042' })`. The new units go to that order first. They fill its waiting build request, or take the place of units kept for it, which go back to ready and can fill other waiting requests. An order holding nothing of the recipe, including one whose units have all shipped, is refused with `nothingReserved`, and nothing is built. The result's `assigned` says which unit went where. Agreed with Kits for its packing station.
 
-Tested: 72 tests (2 new).
+- **Tested with Payload's multi-tenant plugin:** `scopeField: 'tenant'` with `@payloadcms/plugin-multi-tenant` 3.92.1 adding the field (dev-only). Startup refuses when a Kitting collection is left out of its list, and the per-site rules and its access hold. No code changes.
+
+Tested: 79 tests (9 new).
 
 ## 0.2.1 (2026-11-10)
 
