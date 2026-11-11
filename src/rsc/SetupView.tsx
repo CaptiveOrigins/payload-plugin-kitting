@@ -2,6 +2,7 @@ import { DefaultTemplate } from '@payloadcms/next/templates'
 import type { AdminViewServerProps } from 'payload'
 import React from 'react'
 
+import { mayUse } from '../access.js'
 import { setupProgress, suppliesOf } from '../stock.js'
 
 /** /admin/supplies/setup: getting started, one step at a time, in plain words. */
@@ -9,7 +10,8 @@ export async function SetupView({ initPageResult, params, searchParams }: AdminV
   const { req, permissions, visibleEntities, locale } = initPageResult
   const o = suppliesOf(req.payload)
   const admin = req.payload.config.routes.admin
-  const canManage = req.user ? Boolean(await o.manage({ req } as never)) : false
+  // `true` or a query (setupProgress reads as this person); anything else, a throw included, is no.
+  const canManage = req.user ? await mayUse(() => o.manage({ req } as never)) : false
   const p = canManage ? await setupProgress(req.payload, { user: req.user }) : null
   const link = (href: string, text: string) => (
     <a className="btn btn--style-secondary btn--size-small" style={{ margin: '8px 8px 0 0' }} href={href}>

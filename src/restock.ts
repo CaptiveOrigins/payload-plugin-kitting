@@ -1,5 +1,6 @@
 import type { CollectionSlug, Payload, Where } from 'payload'
 
+import { exactlyTrue } from './access.js'
 import { readyStatus } from './readystock.js'
 import { idOf, planRecipe, round, sameID, stockReport, suppliesOf } from './stock.js'
 import type { ID } from './types.js'
@@ -80,7 +81,8 @@ export type RestockArrival = { id: unknown; number: string; supplier: string }
 /**
  * Restock's "Arrived, please confirm" orders for Kitting's Today line (crossing `kitting-restock`).
  * Read through `config.custom.restock`, so Kitting doesn't depend on Restock. Only for a signed-in
- * person who may manage supplies; anyone else gets nothing, and Restock isn't asked. If Restock
+ * person whose `manage` answers exactly `true` (every site); anyone else, staff limited to some sites by a
+ * query included, gets nothing, and Restock isn't asked. If Restock
  * fails, the line is left out and the error logged: Today still loads. It never adds stock.
  */
 export async function restockArrivals(payload: Payload, options: { req: Partial<import('payload').PayloadRequest> }): Promise<RestockArrival[]> {
@@ -89,7 +91,9 @@ export async function restockArrivals(payload: Payload, options: { req: Partial<
   const req = { ...options.req, payload } as import('payload').PayloadRequest
   if (!req.user) return []
   const o = suppliesOf(payload)
-  if (!(await o.manage({ req } as never))) return []
+  // Only an exact `true`. A query (staff limited to some sites) can't be applied to Restock's orders from here, so
+  // it's a no rather than every site's deliveries; so is any other truthy answer, or a thrown error.
+  if (!(await exactlyTrue(() => o.manage({ req } as never)))) return []
   try {
     return await restock.arrived({ payload, user: req.user })
   } catch (error) {

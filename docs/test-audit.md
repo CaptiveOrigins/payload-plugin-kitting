@@ -213,3 +213,14 @@ The docs pass found that a site passing the Shipping plugin got no carrier rates
 
 - **The startup warning for a provider another plugin registered:** it's a log line with no effect; the runtime fallback it warns about is tested.
 - **Shipping's real `quote` against EasyPost:** Shipping's own tests cover it. A type check against Shipping's source confirmed its `quote` fits the adapter's type; Kitting's tests use a made-up function of that shape.
+
+## 2026-11-11, only an exact `true`, or a query that is applied
+
+Suite: 83 tests before, 85 after (`npx vitest run`). From an access sweep.
+
+- **The change.** `src/access.ts`: `exactlyTrue`, `isWhere` (a well-formed, non-empty query of `and`/`or` lists and known operators), `trueOrWhere` and `mayUse`; a throw is always a no. `restockArrivals` took any truthy `manage` answer, so a site-scoped query showed Restock's arrivals from every site. A query can't be applied to Restock's orders from here (Restock's `arrived` returns no site), so it now needs an exact `true`, and anything else, a query included, gets nothing without asking Restock. The overview, count, build and getting-started views read `read` and `manage` as truthy; they now use `mayUse`: `true` or a well-formed query (which their reads apply, since they don't override access), and nothing else.
+- **Tests.** In `kitting.test.ts`, "shows them only to people who manage every site…": staff with a site query get nothing and Restock isn't asked; someone answered `true` gets the list; `1`, `'yes'`, `{}`, `{ tenant: false }`, a throw and a rejection get nothing. The old expectation that site-scoped staff see the list was changed on purpose. New `views.test.ts` (Payload's admin shell and UI kit stubbed, a made-up Payload that reads nothing, the stock report stubbed): count, build and setup show their refusal and read nothing for those six answers, and read for `true` and a site query; the overview refuses on the same answers from `read`, and runs its manager-only reads only when `manage` says `true` or a query.
+- **Mutation checks.** 11 mutations, each a Python string replace restored byte for byte (SHA-256 checked). All 11 fail the suite: truthy passing and errors rethrown in the helpers; `isWhere` taking any object; `trueOrWhere` passing truthy answers; the old truthy check put back at the arrivals, count, build, setup, overview `manage` and overview `read`.
+- **For the lead.** Site-scoped staff no longer see the arrivals line on Today. Showing it to them safely needs Restock's `arrived` to return each order's site (its internal list has it), so Kitting can keep only the sites the query allows. That's a change to the crossing contract, in both repos.
+- **Skipped.** The views are checked through their element trees and the reads they make, not rendered in a real admin.
+

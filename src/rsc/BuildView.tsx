@@ -2,6 +2,7 @@ import { DefaultTemplate } from '@payloadcms/next/templates'
 import type { AdminViewServerProps, CollectionSlug } from 'payload'
 import React from 'react'
 
+import { mayUse } from '../access.js'
 import { BuildForm } from '../client/BuildForm.js'
 import { describeUse, getItem, idOf, num, shrinkagePercent, siteShrinkage, suppliesOf } from '../stock.js'
 
@@ -12,7 +13,8 @@ export async function BuildView({ initPageResult, params, searchParams }: AdminV
   const { req, permissions, visibleEntities, locale } = initPageResult
   const o = suppliesOf(req.payload)
   const admin = req.payload.config.routes.admin
-  const canManage = req.user ? Boolean(await o.manage({ req } as never)) : false
+  // `true` or a query (applied by the reads below, which don't override access); anything else, a throw included, is no.
+  const canManage = req.user ? await mayUse(() => o.manage({ req } as never)) : false
   const recipes = canManage
     ? ((await req.payload.find({ collection: o.recipes as CollectionSlug, where: { active: { not_equals: false } }, overrideAccess: false, user: req.user, depth: 0, pagination: false, sort: 'name' })).docs as Doc[])
     : []

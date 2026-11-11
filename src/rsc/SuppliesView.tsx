@@ -4,6 +4,7 @@ import React from 'react'
 
 import type { CollectionSlug } from 'payload'
 
+import { mayUse } from '../access.js'
 import { recommendReadyStock } from '../build.js'
 import { AcceptBaseline } from '../client/AcceptBaseline.js'
 import { readyStatus, STATE_TEXT, type ReadyStatus } from '../readystock.js'
@@ -41,8 +42,8 @@ const emailText = (r: StockRow) => {
 
 async function allowed(req: PayloadRequest) {
   if (!req.user) return false
-  const access = await suppliesOf(req.payload).read({ req } as never)
-  return Boolean(access)
+  // `true` or a query (the reads below apply it); anything else, a throw included, is no.
+  return mayUse(() => suppliesOf(req.payload).read({ req } as never))
 }
 
 const cell: React.CSSProperties = { padding: '8px 12px', borderBottom: '1px solid var(--theme-elevation-150)', textAlign: 'left', verticalAlign: 'top' }
@@ -61,7 +62,7 @@ export async function SuppliesView({ initPageResult, params, searchParams }: Adm
   if (ok) await sendPendingAlerts(req.payload).catch((error) => req.payload.logger.error({ err: error, msg: 'kitting: pending alerts not sent' }))
   const { rows, below, expiring } = ok ? await stockReport(req.payload, { user: req.user }) : { rows: [], below: [], expiring: [] }
   // Ready stock: recipes with a number to keep, or with built units.
-  const canManage = ok && Boolean(await o.manage({ req } as never))
+  const canManage = ok && (await mayUse(() => o.manage({ req } as never)))
   const recipes = ok
     ? ((await req.payload.find({ collection: o.recipes as CollectionSlug, where: { active: { not_equals: false } }, overrideAccess: false, user: req.user, depth: 0, pagination: false, sort: 'name' })).docs as Record<string, any>[]) // eslint-disable-line @typescript-eslint/no-explicit-any
     : []

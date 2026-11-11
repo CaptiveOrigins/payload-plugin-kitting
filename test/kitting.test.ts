@@ -1066,7 +1066,7 @@ describe('what to buy, for Restock', () => {
 })
 
 describe('Restock’s arrivals on Today', () => {
-  it('shows them only to people who may manage supplies, and survives Restock failing', async () => {
+  it('shows them only to people who manage every site (an exact true), and survives Restock failing', async () => {
     const custom = payload.config.custom as Record<string, unknown>
     const before = custom.restock
     const asked: unknown[] = []
@@ -1081,9 +1081,27 @@ describe('Restock’s arrivals on Today', () => {
       expect(await restockArrivals(payload, { req: {} })).toEqual([])
       expect(await restockArrivals(payload, { req: { user: { ...viewerA, collection: 'users' } as never } })).toEqual([])
       expect(asked).toEqual([])
-      // Staff see the list, asked as themselves.
-      expect(await restockArrivals(payload, { req: { user: { ...staffA, collection: 'users' } as never } })).toEqual(list)
-      expect((asked[0] as Doc).id).toBe(staffA.id)
+      // Staff limited to their sites by a query: nothing, since the query can't be applied to Restock's orders.
+      expect(await restockArrivals(payload, { req: { user: { ...staffA, collection: 'users' } as never } })).toEqual([])
+      expect(asked).toEqual([])
+      // Someone who manages every site (an exact true) sees the list, asked as themselves.
+      const lead = await create('users', { email: `lead-${Math.random().toString(36).slice(2, 7)}@example.com`, password: 'a-long-test-password', role: 'admin', tenants: [] })
+      expect(await restockArrivals(payload, { req: { user: { ...lead, collection: 'users' } as never } })).toEqual(list)
+      expect((asked[0] as Doc).id).toBe(lead.id)
+
+      // Any other truthy answer from manage, or a throw, is a no, and Restock isn't asked.
+      const o = payload.config.custom!.kitting as { manage: unknown }
+      const manage = o.manage
+      try {
+        for (const answer of [() => 1, () => 'yes', () => ({}), () => ({ tenant: false }), () => { throw new Error('made-up failure') }, async () => { throw new Error('made-up failure') }]) {
+          o.manage = answer
+          asked.length = 0
+          expect(await restockArrivals(payload, { req: { user: { ...lead, collection: 'users' } as never } })).toEqual([])
+          expect(asked).toEqual([])
+        }
+      } finally {
+        o.manage = manage
+      }
 
       // Restock failing leaves the line out instead of breaking Today.
       custom.restock = { arrived: async () => { throw new Error('made-up failure') } }
