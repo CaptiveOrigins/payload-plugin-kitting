@@ -48,7 +48,8 @@ export type KittingPluginOptions = {
   /**
    * Box suggestions (level 3) use a shipping plugin's real rates when there is one: pass `provider`, or
    * let the shipping plugin register itself at `config.custom.shipping.provider`. Without one, your
-   * postage rates. `currency` is for display (default USD).
+   * postage rates. For the Shipping plugin, pass `provider: ratesFromShipping({ quote, from })`. A provider
+   * here without `quoteRates` stops startup. `currency` is for display (default USD).
    */
   shipping?: { provider?: ShippingProvider; currency?: string }
   /**

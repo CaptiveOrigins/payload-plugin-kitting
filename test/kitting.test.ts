@@ -1,10 +1,10 @@
 import { mongooseAdapter } from '@payloadcms/db-mongodb'
-import type { ShippingProvider } from '../src/index.js'
+import type { ShippingProvider, ShippingQuoteFn } from '../src/index.js'
 import { MongoMemoryReplSet } from 'mongodb-memory-server'
 import { buildConfig, getPayload, type Access, type CollectionConfig, type Field, type Payload } from 'payload'
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { applyRecipe, assignUnits, recommendBoxes, restockArrivals, restockNeeds, setupProgress, siteShrinkage, stockCount, buildUnits, recommendReadyStock, release, shipUnits, swapUnit, kittingPlugin, KittingError, voidUnit, sendPendingAlerts, stockReport, suggestShrinkagePercent, writeOffExpired } from '../src/index.js'
+import { ratesFromShipping, applyRecipe, assignUnits, recommendBoxes, restockArrivals, restockNeeds, setupProgress, siteShrinkage, stockCount, buildUnits, recommendReadyStock, release, shipUnits, swapUnit, kittingPlugin, KittingError, voidUnit, sendPendingAlerts, stockReport, suggestShrinkagePercent, writeOffExpired } from '../src/index.js'
 
 // Made-up data throughout: example.com addresses, invented supplies and sites.
 type Doc = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -868,10 +868,49 @@ describe('box suggestions', () => {
     expect([real.packings[0]!.total, real.packings[0]!.basis]).toEqual([5, 'carrier']) // big box 3 + 2
     expect(real.packings[0]!.summary).toMatch(/\(Example Post rates\)$/)
 
-    const broken: ShippingProvider = { name: 'Down Post', quoteRates: async () => Promise.reject(new Error('timeout')) }
-    const fallback = await recommendBoxes(payload, { recipe: { id: recipe.id }, count: 5, provider: broken })
-    expect(fallback.packings[0]!.total).toBe(12.2)
-    expect(fallback.notes).toContain('Rates unavailable from Down Post; ranked by box cost and your postage rates.')
+    // A provider that throws: packing isn't blocked, the error's name is logged once, and every suggestion says it uses your rates.
+    const warn = vi.spyOn(payload.logger, 'warn')
+    try {
+      const broken: ShippingProvider = { name: 'Down Post', quoteRates: async () => Promise.reject(Object.assign(new Error('made-up: secret detail'), { name: 'TimeoutError' })) }
+      const fallback = await recommendBoxes(payload, { recipe: { id: recipe.id }, count: 5, provider: broken })
+      await recommendBoxes(payload, { recipe: { id: recipe.id }, count: 5, provider: broken })
+      expect(fallback.packings.map((p) => [p.total, p.basis])).toEqual(own.packings.map((p) => [p.total, p.basis]))
+      expect(fallback.notes).toContain('Rates unavailable from Down Post; ranked by box cost and your postage rates.')
+      expect(fallback.fallback).toEqual({ provider: 'Down Post', error: 'TimeoutError' })
+      expect(fallback.packings.every((p) => p.summary.endsWith('(your postage rates: Down Post unavailable)'))).toBe(true)
+      const logs = warn.mock.calls.map((c) => String(c[0]))
+      expect(logs.filter((l) => l.includes('Down Post'))).toEqual(['kitting: rates unavailable from Down Post (TimeoutError); box suggestions use your postage rates. Logged once.'])
+      expect(logs.join(' ')).not.toContain('secret detail')
+
+      // The wrong shape at runtime (for example one another plugin registered): the same fallback and mark.
+      const shapeless = { name: 'Odd Post', quote: async () => ({}) } as unknown as ShippingProvider
+      const odd = await recommendBoxes(payload, { recipe: { id: recipe.id }, count: 5, provider: shapeless })
+      expect([odd.packings[0]!.total, odd.packings[0]!.basis, odd.fallback]).toEqual([12.2, 'postage-rates', { provider: 'Odd Post', error: 'RateProviderShapeError' }])
+      const noList = { name: 'Empty Post', quoteRates: async () => ({ quotedAt: new Date().toISOString() }) } as unknown as ShippingProvider
+      expect((await recommendBoxes(payload, { recipe: { id: recipe.id }, count: 5, provider: noList })).fallback).toEqual({ provider: 'Empty Post', error: 'RateProviderShapeError' })
+    } finally {
+      warn.mockRestore()
+    }
+    expect(real.fallback).toBeUndefined()
+
+    // Shipping's own `quote(payload, input, req)`, passed as it is through the adapter (a made-up quote of that shape).
+    const quoted: Parameters<ShippingQuoteFn>[1][] = []
+    const quote: ShippingQuoteFn = async (_payload, input) => {
+      quoted.push(input)
+      const cents = input.parcel.weightOz > 17.7 ? 200 : 500 // over 500 g: 2, else 5
+      return { shipmentId: 'shp_made_up', rate: { id: 'rate_made_up', carrier: 'USPS', service: 'GroundAdvantage', rate: (cents / 100).toFixed(2), fake: true }, rateCents: cents, mode: 'test', fake: true }
+    }
+    const from = { name: 'Example Warehouse', company: null, street1: '1 Example Way', street2: null, city: 'Springfield', state: 'IL', zip: '62701', country: 'US' as const, phone: null }
+    const viaShipping = await recommendBoxes(payload, { recipe: { id: recipe.id }, count: 5, to: { country: 'US', postalCode: '72201' }, reference: 'Order 7', provider: ratesFromShipping({ quote, from }) })
+    expect(viaShipping.packings.map((p) => [p.total, p.basis])).toEqual([
+      [5, 'carrier'], // big box 3 + 2
+      [11.2, 'carrier'], // mailer + envelope: 1.20 + 5 + 5
+      [12, 'carrier'], // two mailers: 2 + 5 + 5
+    ])
+    expect(viaShipping.packings[0]!.summary).toMatch(/\(Shipping rates\)$/)
+    expect(viaShipping.notes).toContain('Shipping: these are made-up test rates.')
+    expect(viaShipping.fallback).toBeUndefined()
+    expect(quoted.every((q) => q.to.zip === '72201' && q.reference === 'Order 7')).toBe(true)
 
     // A carrier that rates only some boxes (here, a price that includes a return label). Its prices
     // aren't comparable with your postage rates, so carrier-priced packings come first, and it says so.

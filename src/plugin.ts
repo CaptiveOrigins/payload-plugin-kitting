@@ -1,5 +1,6 @@
 import type { Access, CollectionConfig, Config, Plugin } from 'payload'
 
+import { assertRateProvider } from './boxes.js'
 import { boxesCollection, settingsCollection, itemsCollection, lotsCollection, postageCollection, requestsCollection, unitsCollection, movementsCollection, recipesCollection, suppliersCollection } from './collections.js'
 import { withEcommerce } from './ecommerce.js'
 import { kittingEndpoints } from './endpoints.js'
@@ -15,6 +16,8 @@ export const kittingPlugin =
   (options: KittingPluginOptions = {}): Plugin =>
   (config: Config): Config => {
     const userSlug = config.admin?.user ?? 'users'
+    // A provider passed here is checked now, so a wrong one stops startup instead of quietly failing every suggestion.
+    if (options.shipping?.provider !== undefined) assertRateProvider(options.shipping.provider, '`shipping.provider`')
     const signedIn: Access = ({ req }) => Boolean(req.user && req.user.collection === userSlug)
     const o: ResolvedSupplies = {
       items: options.slugs?.items ?? 'supply-items',
@@ -88,6 +91,13 @@ export const kittingPlugin =
               `Kitting: scopeField is "${o.scopeField}", but ${missing.join(', ')} ${missing.length > 1 ? 'have' : 'has'} no "${o.scopeField}" field. Add ${missing.length > 1 ? 'them' : 'it'} to your tenant plugin's collections, or add the field with Kitting's \`overrides\`.`,
             )
         }
+        // One another plugin registered (Kitting's own option wins) is checked once here. A wrong one doesn't stop
+        // startup, because it may be there for that plugin's own use, but it's said plainly, and each suggestion is marked.
+        const found = payload.config.custom?.shipping?.provider
+        if (!o.shippingProvider && found && typeof found.quoteRates !== 'function')
+          payload.logger.warn(
+            'Kitting: config.custom.shipping.provider has no `quoteRates` (the Shipping plugin’s carrier provider has `quote`), so box suggestions use your postage rates. To use its rates, pass `shipping: { provider: ratesFromShipping({ quote }) }`.',
+          )
         await config.onInit?.(payload)
       },
       custom: { ...config.custom, kitting: o },

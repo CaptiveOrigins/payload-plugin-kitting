@@ -6,7 +6,11 @@
 
 - **Tested with Payload's multi-tenant plugin:** `scopeField: 'tenant'` with `@payloadcms/plugin-multi-tenant` 3.92.1 adding the field (dev-only). Startup refuses when a Kitting collection is left out of its list, and the per-site rules and its access hold. No code changes.
 
-Tested: 79 tests (9 new).
+- **Box suggestions with the Shipping plugin:** `ratesFromShipping({ quote, from })` adapts Shipping's `quote(payload, input, req)` to Kitting's `quoteRates`, without importing Shipping. Before, a site that passed Shipping's provider got no carrier rates and no sign of it.
+
+- **A failing rate provider is visible now.** Kitting still falls back to your postage rates, so packing is never blocked, but it returns `fallback: { provider, error }`, ends each summary with "(your postage rates: … unavailable)", and logs the error's name once per provider. A provider that hands back no `rates` list counts as failing. A `shipping.provider` without `quoteRates` now stops startup with a message pointing to the adapter; one registered by another plugin gets a startup warning instead.
+
+Tested: 83 tests (13 new, 1 extended). Not tested: Shipping's real `quote` against EasyPost (a made-up function of its shape was used; its type was checked against Shipping's source).
 
 ## 0.2.1 (2026-11-10)
 

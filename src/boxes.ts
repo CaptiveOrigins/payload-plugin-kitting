@@ -23,6 +23,35 @@ export type Packing = {
   summary: string
 }
 
+/** Set when a rate provider was configured but failed: the suggestions use your postage rates instead. */
+export type RatesFallback = { provider: string; error: string }
+
+/** A rate provider that isn't a function of the right shape, or gave back something that isn't a rate list. */
+export class RateProviderShapeError extends Error {
+  override name = 'RateProviderShapeError'
+}
+
+/** Throws unless `provider` has a `quoteRates` function. Shared by startup and each suggestion. */
+export function assertRateProvider(provider: unknown, where: string): asserts provider is ShippingProvider {
+  if (provider && typeof provider === 'object' && typeof (provider as ShippingProvider).quoteRates === 'function') return
+  const shippingLike = provider && typeof provider === 'object' && typeof (provider as { quote?: unknown }).quote === 'function'
+  throw new RateProviderShapeError(
+    `Kitting: ${where} has no \`quoteRates\` function${shippingLike ? ' (it has `quote`, like the Shipping plugin’s carrier provider)' : ''}. ` +
+      'To use the Shipping plugin’s rates, pass `shipping: { provider: ratesFromShipping({ quote }) }`, with `quote` imported from the Shipping plugin. Any other provider needs `name` and `quoteRates`.',
+  )
+}
+
+/** Each provider's failure is logged once per kind of error, so a carrier that's down doesn't flood the log. */
+const logged = new WeakMap<object, Set<string>>()
+const notAnObject = {}
+function logOnce(payload: Payload, provider: object, providerName: string, errorName: string) {
+  const seen = logged.get(provider) ?? new Set<string>()
+  logged.set(provider, seen)
+  if (seen.has(errorName)) return
+  seen.add(errorName)
+  payload.logger.warn(`kitting: rates unavailable from ${providerName} (${errorName}); box suggestions use your postage rates. Logged once.`)
+}
+
 /**
  * The ways to pack `count` units: all in one box type, or one type plus one other box for the rest.
  * Pure, so it can be tested with known boxes.
@@ -67,7 +96,7 @@ export const byCost = (a: Packing, b: Packing) =>
 export async function recommendBoxes(
   payload: Payload,
   args: { recipe: RecipeRef; count: number; scope?: ID; to?: ShippingAddress; from?: ShippingAddress; reference?: string; limit?: number; req?: Req; provider?: ShippingProvider | null },
-): Promise<{ packings: Packing[]; notes: string[]; currency: string }> {
+): Promise<{ packings: Packing[]; notes: string[]; currency: string; fallback?: RatesFallback }> {
   const o = suppliesOf(payload)
   const req = args.req ?? {}
   if (!Number.isInteger(args.count) || args.count < 1) throw new KittingError('count', 'The count is a whole number, 1 or more.')
@@ -76,6 +105,7 @@ export async function recommendBoxes(
   const scoped: Where[] = o.scopeField ? [{ [o.scopeField]: { equals: scope } }] : []
   const unitWeight = num(r.unitWeight)
   const notes: string[] = []
+  let fallback: RatesFallback | undefined
   const boxes: BoxOption[] = []
   const fitBox = (b: { id: ID; name: string; capacity: number; cost?: number; emptyWeight?: number; maxWeight?: number | null; dimensions?: BoxOption['dimensions'] }) => {
     let capacity = b.capacity
@@ -128,6 +158,7 @@ export async function recommendBoxes(
   if (unitWeight && rates.length === 0) notes.push('No postage rates are set, so postage isn’t included. Ranked by box cost.')
 
   const provider = args.provider === null ? undefined : (args.provider ?? o.shippingProvider ?? (payload.config.custom?.shipping?.provider as ShippingProvider | undefined))
+  const providerName = typeof provider?.name === 'string' && provider.name ? provider.name : 'the rate provider'
   if (provider && unitWeight) {
     const candidates = ranked.slice(0, Math.max((args.limit ?? 3) * 2, 6))
     const packed: PackedBox[] = []
@@ -140,8 +171,11 @@ export async function recommendBoxes(
         keyOf.set(pb, { p, i })
       }),
     )
+    const before = candidates.map((p) => ({ postage: p.postage, total: p.total, basis: p.basis, boxes: p.boxes.map((x) => x.postage) }))
     try {
+      assertRateProvider(provider, 'the shipping provider')
       const result = await provider.quoteRates({ boxes: packed, to: args.to, from: args.from, reference: args.reference, scope: scope ?? undefined }, { payload, req })
+      if (!result || !Array.isArray(result.rates)) throw new RateProviderShapeError('quoteRates gave no `rates` list.')
       const best = cheapestPerBox(result, packed)
       for (const p of candidates) {
         const ids = p.boxes.map((_, i) => `${candidates.indexOf(p)}-${i}`)
@@ -153,17 +187,24 @@ export async function recommendBoxes(
         }
       }
       const priced = candidates.filter((p) => p.basis === 'carrier')
-      if (!priced.length) notes.push(`${provider.name} gave no rates; ranked by box cost and your postage rates.`)
+      if (!priced.length) notes.push(`${providerName} gave no rates; ranked by box cost and your postage rates.`)
       else if (priced.length < candidates.length)
-        notes.push(`${provider.name} had no rate for some packings, so they are listed after the ones it priced: their postage comes from your postage rates and isn’t comparable.`)
-      for (const n of result.notes ?? []) notes.push(`${provider.name}: ${n}`)
+        notes.push(`${providerName} had no rate for some packings, so they are listed after the ones it priced: their postage comes from your postage rates and isn’t comparable.`)
+      for (const n of result.notes ?? []) notes.push(`${providerName}: ${n}`)
       // A carrier's price (which may include a return label) and your postage rates don't compare:
       // packings it priced come first, then all the others (unpriced or not sent), each group by cost.
       const rest = [...candidates.filter((p) => p.basis !== 'carrier'), ...ranked.slice(candidates.length)]
       ranked = [...priced.sort(byCost), ...rest.sort(byCost)]
     } catch (error) {
-      payload.logger.warn({ err: error, msg: 'kitting: carrier rates unavailable' })
-      notes.push(`Rates unavailable from ${provider.name}; ranked by box cost and your postage rates.`)
+      // Packing never waits on a carrier: fall back to your postage rates, and say so on every suggestion.
+      candidates.forEach((p, i) => {
+        const b = before[i]!
+        Object.assign(p, { postage: b.postage, total: b.total, basis: b.basis })
+        p.boxes.forEach((x, j) => (x.postage = b.boxes[j]!))
+      })
+      fallback = { provider: providerName, error: error instanceof Error ? error.name : 'Error' }
+      logOnce(payload, typeof provider === 'object' ? provider : notAnObject, providerName, fallback.error)
+      notes.push(`Rates unavailable from ${providerName}; ranked by box cost and your postage rates.`)
     }
   }
   for (const p of ranked) {
@@ -177,7 +218,8 @@ export async function recommendBoxes(
     const parts = [...groups.values()].map((g) => `${g.n} × ${g.name} (${g.units} each)`)
     const cost =
       p.total === null ? `boxes ${money(p.boxCost, o.currency)}` : `boxes ${money(p.boxCost, o.currency)} + postage ${money(p.postage!, o.currency)} = ${money(p.total, o.currency)}`
-    p.summary = `${parts.join(' + ')}: ${cost}${p.basis === 'carrier' ? ` (${provider?.name} rates)` : ''}`
+    const source = p.basis === 'carrier' ? ` (${providerName} rates)` : fallback && p.basis === 'postage-rates' ? ` (your postage rates: ${fallback.provider} unavailable)` : ''
+    p.summary = `${parts.join(' + ')}: ${cost}${source}`
   }
-  return { packings: ranked.slice(0, args.limit ?? 3), notes, currency: o.currency }
+  return { packings: ranked.slice(0, args.limit ?? 3), notes, currency: o.currency, ...(fallback ? { fallback } : {}) }
 }

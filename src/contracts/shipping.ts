@@ -78,7 +78,9 @@ export type ShippingProvider = {
  * How Kitting uses it: for each candidate packing it asks for rates, picks the cheapest rate per box,
  * and ranks packings by box cost plus postage. If the provider throws, times out or returns no rate for
  * a box, Kitting falls back to its own cost rules for that recommendation and says so ("rates
- * unavailable from EasyPost; ranked by box cost and postage bands").
+ * unavailable from EasyPost; ranked by box cost and postage bands"). A failure also sets the result's
+ * `fallback`, marks each summary, and logs the error's name once per provider. The Shipping plugin's
+ * `quote` fits through `ratesFromShipping` (../shipping.ts).
  */
 
 /** The cheapest rate for each box, by box id. A box with no rate is left out (fall back for it). */

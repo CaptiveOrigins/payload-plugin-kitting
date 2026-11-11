@@ -1,7 +1,7 @@
 import type { Payload } from 'payload'
 import { describe, expect, it } from 'vitest'
 
-import { cheapestPerBox, linesByRecipe, type CommerceSource, type PackedBox, type ShippingProvider } from '../src/index.js'
+import { cheapestPerBox, kittingPlugin, linesByRecipe, ratesFromShipping, type CommerceSource, type PackedBox, type ShippingLabelAddress, type ShippingProvider, type ShippingQuoteFn } from '../src/index.js'
 
 // Test doubles: a made-up carrier and a made-up shop, to show the contracts work without either plugin.
 const payload = {} as Payload
@@ -39,6 +39,64 @@ describe('shipping contract', () => {
       ['b1', 'Ground', 9.1],
       ['b2', 'Ground', 5.2],
     ])
+  })
+})
+
+describe('Shipping adapter (made-up quote with Shipping’s shape)', () => {
+  const warehouse: ShippingLabelAddress = { name: 'Example Warehouse', company: null, street1: '1 Example Way', street2: null, city: 'Springfield', state: 'IL', zip: '62701', country: 'US', phone: null }
+  const calls: Parameters<ShippingQuoteFn>[1][] = []
+  // Like Shipping's `quote(payload, input, req)`: one parcel, one rate, in cents.
+  const quote: ShippingQuoteFn = async (_payload, input) => {
+    calls.push(input)
+    if (input.parcel.weightOz > 100) throw Object.assign(new Error('made-up: too heavy'), { name: 'CarrierError' })
+    const cents = input.parcel.weightOz > 8 ? 910 : 520
+    return { shipmentId: `shp_${calls.length}`, rate: { id: `rate_${calls.length}`, carrier: 'USPS', service: 'GroundAdvantage', rate: (cents / 100).toFixed(2), fake: true }, rateCents: cents, mode: 'test', fake: true }
+  }
+  const to = { country: 'US', postalCode: '72201', city: 'Little Rock', region: 'AR' }
+
+  it('quotes each distinct parcel once, in inches and ounces, and gives Kitting rates per box', async () => {
+    calls.length = 0
+    const provider = ratesFromShipping({ quote, from: warehouse })
+    const result = await provider.quoteRates({ boxes: [...boxes, { ...boxes[0]!, id: 'b3' }], to, reference: 'Order 1' }, { payload })
+    expect(calls).toHaveLength(2) // b1 and b3 are the same parcel
+    expect(calls[0]).toMatchObject({ from: warehouse, to: { zip: '72201', city: 'Little Rock', state: 'AR', country: 'US' }, reference: 'Order 1', parcel: { weightOz: 14.9, lengthIn: 9.9, widthIn: 7.1, heightIn: 2 } })
+    expect(result.rates.map((r) => [r.boxId, r.carrier, r.service, r.amount, r.currency])).toEqual([
+      ['b1', 'USPS', 'GroundAdvantage', 9.1, 'USD'],
+      ['b3', 'USPS', 'GroundAdvantage', 9.1, 'USD'],
+      ['b2', 'USPS', 'GroundAdvantage', 5.2, 'USD'],
+    ])
+    expect(result.notes).toEqual(['these are made-up test rates.'])
+  })
+
+  it('leaves a box it couldn’t quote unrated, says why, and passes the error on when nothing could be quoted', async () => {
+    const heavy: PackedBox = { ...boxes[0]!, id: 'h', weight: { value: 5, unit: 'kg' } }
+    const provider = ratesFromShipping({ quote, from: warehouse })
+    const some = await provider.quoteRates({ boxes: [boxes[0]!, heavy], to }, { payload })
+    expect(some.rates.map((r) => r.boxId)).toEqual(['b1'])
+    expect(some.notes).toContain('1 of 2 box sizes couldn’t be quoted (CarrierError).')
+    await expect(provider.quoteRates({ boxes: [heavy], to }, { payload })).rejects.toThrow('made-up: too heavy')
+  })
+
+  it('gives no rates, with the reason, for no destination, outside the US, or nowhere to ship from', async () => {
+    calls.length = 0
+    const noFrom = ratesFromShipping({ quote })
+    expect((await noFrom.quoteRates({ boxes, to }, { payload })).notes).toEqual(['no US address to ship from. Pass `from` to ratesFromShipping.'])
+    const provider = ratesFromShipping({ quote, from: warehouse })
+    expect((await provider.quoteRates({ boxes }, { payload })).notes).toEqual(['no destination, so nothing to quote.'])
+    expect((await provider.quoteRates({ boxes, to: { country: 'CA', postalCode: 'K1A 0B1' } }, { payload })).notes).toEqual(['it quotes US addresses only, and this one is in CA.'])
+    expect(calls).toHaveLength(0)
+  })
+})
+
+describe('rate provider at startup', () => {
+  it('refuses a provider without quoteRates, pointing to the adapter, and takes the adapter', () => {
+    const carrierProvider = { name: 'EasyPost', mode: 'test', quote: async () => ({}) } // Shipping's carrier provider shape
+    expect(() => kittingPlugin({ shipping: { provider: carrierProvider as never } })({} as never)).toThrow(
+      /`shipping.provider` has no `quoteRates` function \(it has `quote`, like the Shipping plugin’s carrier provider\)\. To use the Shipping plugin’s rates, pass `shipping: \{ provider: ratesFromShipping\(\{ quote \}\) \}`/,
+    )
+    expect(() => kittingPlugin({ shipping: { provider: { name: 'Nothing' } as never } })({} as never)).toThrow(/has no `quoteRates` function\. To use/)
+    expect(() => kittingPlugin({ shipping: { provider: ratesFromShipping({ quote: async () => Promise.reject(new Error('unused')) }) } })({} as never)).not.toThrow()
+    expect(() => ratesFromShipping({} as never)).toThrow(/needs Shipping’s `quote` function/)
   })
 })
 

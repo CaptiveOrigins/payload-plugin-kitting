@@ -148,3 +148,9 @@ Settled decisions from the owner, through Helm's feed. The feed holds the owner'
 - **D12** No plugin-family tags yet. None are in `package.json` keywords.
 - **D13** The activation QR goes on the kit bag only, never on the kit's box. Kitting's own label presets (built unit, supply lot, shelf) carry no activation, and the packing station prints whatever the provider's sets list; activation stays the provider's (Kits').
 - Not for this repo: D9 (PM doc), D10 (tour before studbook), D11 (kids decide on guardian suggestions), D14 (plan B), D15 (Husbandry.Pro link), D16 (both views).
+
+## 2026-11-10 (made while building; the owner can change them): Shipping's rates through an adapter
+
+- **An exported adapter, not a new option.** `ratesFromShipping({ quote, from })` turns Shipping's `quote(payload, input, req)` into a `ShippingProvider`, passed as `shipping: { provider }`. `quoteRates` stays the one contract, so other carriers and Kits' provider are unchanged, and the adapter has a home for what only Shipping needs (a full ship-from address, US only, inches and ounces). Kitting copies the shape of Shipping's function and imports nothing from it (D2). It wraps Shipping's `quote`, not its carrier provider, so Shipping's go-ahead hook runs before every quote.
+- **Failures fall back, visibly.** A provider that throws or gives the wrong shape never blocks packing. The suggestion carries `fallback` and a marked summary, and the error's name (not its message, which may hold carrier details) is logged once per provider.
+- **Wrong shape at startup.** A provider passed in Kitting's own options without `quoteRates` stops startup. One found at `config.custom.shipping.provider` only warns, because the Shipping plugin keeps its own carrier provider there for its own use, and refusing would stop every site that installs both.

@@ -195,3 +195,21 @@ The eighth audit left this untried: every scope test added `tenant` by hand with
 
 - **The admin panel's tenant selector and cookie:** UI, outside the Local API. It belongs with the platform check in a real host.
 - **The tenant plugin's own internals** (its users array, tenant clean-up on delete): its tests, not Kitting's.
+
+## 2026-11-10, seventh audit: the Shipping adapter
+
+The docs pass found that a site passing the Shipping plugin got no carrier rates: Kitting asked for `quoteRates`, Shipping offers `quote`, and the failure fell back to postage rates with nothing to show for it. That's a fail-closed check that said nothing, so it's covered now.
+
+83 tests (4 new, 1 extended).
+
+### Gaps added
+
+- **Shipping's `quote` through `ratesFromShipping`:** a made-up `quote` of Shipping's exact shape gives carrier-priced suggestions; one quote per distinct parcel, converted to inches and ounces and rounded up; a box that couldn't be quoted is left unrated with a note; when nothing could be quoted the error is passed on; no rates (and the reason) without a destination, outside the US, or with nowhere to ship from.
+- **Fallback is visible:** a throwing provider and one of the wrong shape (no `quoteRates`, or no `rates` list) fall back to postage rates, return `fallback`, mark every summary, and log the error's name once, never its message.
+- **Startup refusal:** a `shipping.provider` without `quoteRates` stops startup with a message pointing to the adapter; the adapter itself is accepted.
+- Mutation-checked: removing the startup refusal, the shape guard, the rates-list check, the log-once, the fallback mark or the adapter's rethrow each fails a test.
+
+### Skipped, and why
+
+- **The startup warning for a provider another plugin registered:** it's a log line with no effect; the runtime fallback it warns about is tested.
+- **Shipping's real `quote` against EasyPost:** Shipping's own tests cover it. A type check against Shipping's source confirmed its `quote` fits the adapter's type; Kitting's tests use a made-up function of that shape.
