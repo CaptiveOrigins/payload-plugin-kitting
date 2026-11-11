@@ -2,9 +2,9 @@
 
 ## Unreleased
 
-- **Build at packing, straight into one order:** `buildUnits(payload, recipe, ids, { scope, assignTo: 'Order 1042' })`. The new units go to that order first. They fill its waiting build request, or take the place of units kept for it, which go back to ready and can fill other waiting requests. An order holding nothing of the recipe is refused with `nothingReserved`, and nothing is built. The result's `assigned` says which unit went where. Agreed with Kits for its packing station.
+- **Build at packing, straight into one order:** `buildUnits(payload, recipe, ids, { scope, assignTo: 'Order 1042' })`. The new units go to that order first. They fill its waiting build request, or take the place of units kept for it, which go back to ready and can fill other waiting requests. An order holding nothing of the recipe, including one whose units have all shipped, is refused with `nothingReserved`, and nothing is built. The result's `assigned` says which unit went where. Agreed with Kits for its packing station.
 
-Tested: 71 tests (1 new).
+Tested: 72 tests (2 new).
 
 ## 0.2.1 (2026-11-10)
 

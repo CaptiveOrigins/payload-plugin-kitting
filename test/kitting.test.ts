@@ -759,6 +759,15 @@ describe('fulfilment: assign, queue, swap, release', () => {
     const before = (await payload.count({ collection: 'assembled-units' as never, where: { recipe: { equals: recipe.id } } })).totalDocs
     await expect(buildUnits(payload, { id: recipe.id }, [`P3-${run()}`], { scope: siteA.id, assignTo: `Nobody ${run()}` })).rejects.toMatchObject({ code: 'nothingReserved' })
     expect((await payload.count({ collection: 'assembled-units' as never, where: { recipe: { equals: recipe.id } } })).totalDocs).toBe(before)
+    // An order whose units have all shipped holds nothing either, as swapUnit says.
+    const done = `Order ${run()}`
+    const shipped = `P4-${run()}`
+    await buildUnits(payload, { id: recipe.id }, [shipped], { scope: siteA.id })
+    const [kept] = (await assignUnits(payload, { id: recipe.id }, 1, { reference: done, scope: siteA.id })).assigned
+    await shipUnits(payload, [(await unitsOf(recipe))[kept!.externalId]!.id])
+    const beforeShipped = (await payload.count({ collection: 'assembled-units' as never, where: { recipe: { equals: recipe.id } } })).totalDocs
+    await expect(buildUnits(payload, { id: recipe.id }, [`P5-${run()}`], { scope: siteA.id, assignTo: done })).rejects.toMatchObject({ code: 'nothingReserved' })
+    expect((await payload.count({ collection: 'assembled-units' as never, where: { recipe: { equals: recipe.id } } })).totalDocs).toBe(beforeShipped)
   })
 
   it('builds at packing only into this site’s order: another site’s order of the same name, or no name, is refused and nothing is written', async () => {

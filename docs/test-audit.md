@@ -167,3 +167,5 @@ Since the fifth audit: the scope field check (9662ca0), `buildUnits`' `assignTo`
 - **The scope check's singular wording** ("has" for one collection): cosmetic.
 - **A real host with Payload's multi-tenant plugin adding the field:** still untested, as 9662ca0 says. The test adds the field by hand with `overrides`, which is what the check reads. On the lead's list for the next platform check.
 - **Docs-only commits:** nothing to test.
+
+Lead's follow-up (2026-11-10): the bug above is fixed. `assignTo` counts only units still kept, not shipped ones, as `swapUnit` does. The assignTo test now covers an order whose units have all shipped, and putting the old check back fails it.

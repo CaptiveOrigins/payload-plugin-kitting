@@ -185,7 +185,8 @@ export async function release(
  * Units just built for one order (`buildUnits`' `assignTo`, for building at packing), inside the build's
  * transaction. Each unit fills the order's open build request if it has one; otherwise it takes the place of one
  * of the order's assigned (not shipped) units, which goes back to ready, as `swapUnit` does. Units left over go
- * to other requests as usual. Refuses with `nothingReserved` when the order holds nothing of the recipe, so a
+ * to other requests as usual. Refuses with `nothingReserved` when the order holds nothing of the recipe (shipped
+ * units don't count), so a
  * build can't quietly reserve stock for an order that doesn't want it. Returns the units it gave, and the leftovers.
  */
 export async function assignBuilt(
@@ -200,7 +201,9 @@ export async function assignBuilt(
   if (!ref) throw new KittingError('reference', 'Say which order this is for.')
   const scope = o.scopeField ? idOf(recipe[o.scopeField]) : null
   const held = await heldBy(payload, o, req, recipe, scope, ref)
-  if (!held.units.length && !held.queued) throw new KittingError('nothingReserved', `${ref} has no ${recipe.name} kept for it.`)
+  // Only units still kept (not shipped) or places still waiting count: an order whose units have all gone out
+  // holds nothing, as in swapUnit, so the build can't look as if it went to that order.
+  if (!held.units.some((u) => u.status === 'assigned') && !held.queued) throw new KittingError('nothingReserved', `${ref} has no ${recipe.name} kept for it.`)
   const now = new Date().toISOString()
   const given: { unit: BuiltUnit; released: BuiltUnit | null; fromRequest: ID | null }[] = []
   const queue = [...units]
