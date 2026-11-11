@@ -58,6 +58,20 @@ Ordering from suppliers is its own plugin, Restock, which drafts purchase orders
 
 It doesn't do purchase orders, costs or prices yet.
 
+## On its own, and with others
+
+**On its own:** Kitting needs only Payload. It adds its own collections and admin pages, and with nothing else installed it's a supply tracker, a recipe builder and, if you switch it on, an order packer. The low-stock email goes out through your site's email adapter.
+
+**Works with:**
+- **Restock:** drafts purchase orders from `restockNeeds`, and its arrived deliveries show on Today through `config.custom.restock`. Neither imports the other. See [What to buy (for Restock)](#what-to-buy-for-restock).
+- **Shipping:** box suggestions use real rates from any provider with Kitting's `quoteRates` shape (`shipping: { provider }`, or `config.custom.shipping.provider`). Shipping's own carrier provider has `quote`, not `quoteRates`, so today it needs a small wrapper; without one, Kitting ranks by your postage rates and says so. See [Box suggestions](#box-suggestions).
+- **Sample Kits:** passes Kitting's own functions in through its `adapters.kitting`, and turns each built unit into a kit with `units.onBuild`.
+- **Scan** (designed, not built): the packing station in [docs/station-design.md](docs/station-design.md) takes Scan's camera button as an optional adapter. A USB scanner works today, since it types.
+- **Labels** (designed, not built): Labels plans ready-made labels for built units, lots and shelves, offered through `config.custom.labels.providers`.
+- **Payload's ecommerce plugin:** see [With Payload's ecommerce plugin](#with-payloads-ecommerce-plugin).
+
+**Family:** Kitting sits in the Fulfillment family, with Restock, Sample Kits, Shipping, Scan, Labels, Wizards, Custody and Sequences, though the families are a working draft and Fulfillment is due to be split into different groups.
+
 ## Install
 
 ```bash
