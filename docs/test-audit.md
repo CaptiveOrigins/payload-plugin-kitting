@@ -137,3 +137,33 @@ Restock's move to Kitting 0.2.0 found that a scoped site which skips `kitting-se
 - `buildUnits` with `assignTo`: the order's waiting request beats an older request; with nothing waiting, it takes a kept unit's place, and the freed unit fills another waiting request; an order holding nothing is refused with `nothingReserved`, and nothing is written.
 
 71 tests. Nothing skipped.
+
+## 2026-11-10, eighth audit (fortnightly pass over what landed since the fifth)
+
+Since the fifth audit: the scope field check (9662ca0), `buildUnits`' `assignTo` (f2b614c), and docs only (the station design, the decision feed, the roadmap). The sixth and seventh audits added tests with each change; this pass checks them against the README, the CHANGELOG and `docs/decisions.md`.
+
+### Covered
+
+| Promise | Tests |
+|---|---|
+| **Fails closed:** with a scope field, startup stops when any Kitting collection lacks it, naming each, before the host's `onInit` | scope field check: stops startup… |
+| It starts, and runs the host's `onInit`, when every collection has the field and when there's no scope field | scope field check: starts when… |
+| `assignTo`: the order's waiting request first, over an older one; else a kept unit's place, and the freed unit fills another waiting request; `assigned` says which went where | fulfilment: builds at packing straight into one order… |
+| `assignTo` on an order holding nothing is refused with `nothingReserved`, and no unit is written | the same test |
+
+### Gap added (1 test)
+
+- **Site isolation and writing nothing, for `assignTo`:** site B keeps a unit for an order, and site A builds for an order of the same name, which holds nothing on site A. The build is refused with `nothingReserved`, and a blank order name with `reference`. Neither writes a unit or a stock movement, and site B's unit stays kept for its order. The seventh audit's test checked units but not movements, and didn't cross sites.
+
+72 tests.
+
+### Found, not fixed (for the lead)
+
+- **`assignTo` and an order whose units have all shipped.** `assignBuilt` refuses only when the order holds no units at all, and it counts shipped units as held. So an order with only shipped units isn't refused: the build goes ahead, `assigned` is empty, and the new unit goes to another waiting request or stays ready. `swapUnit` refuses the same order with `nothingReserved`. The packing station could take a successful build to mean the unit went to the order. Either refuse it as `swapUnit` does, or document it and have the station check `assigned`. Not tested here, because the right behavior is the lead's call.
+
+### Skipped, and why
+
+- **`assignTo` access by role:** `buildUnits` runs the order lookup with the caller's `req`, and the builder's access (viewer, other site, signed out) is tested already. `POST /api/kitting/build` doesn't take `assignTo`, so there's no new HTTP path.
+- **The scope check's singular wording** ("has" for one collection): cosmetic.
+- **A real host with Payload's multi-tenant plugin adding the field:** still untested, as 9662ca0 says. The test adds the field by hand with `overrides`, which is what the check reads. On the lead's list for the next platform check.
+- **Docs-only commits:** nothing to test.

@@ -761,6 +761,26 @@ describe('fulfilment: assign, queue, swap, release', () => {
     expect((await payload.count({ collection: 'assembled-units' as never, where: { recipe: { equals: recipe.id } } })).totalDocs).toBe(before)
   })
 
+  it('builds at packing only into this site’s order: another site’s order of the same name, or no name, is refused and nothing is written', async () => {
+    const { recipe } = await stocked(0)
+    const swabId = ((l) => (typeof l === 'object' ? l.id : l))((recipe.lines as Doc[])[0]!.item)
+    // Site B keeps a unit for "Order <x>"; site A's order of the same name holds nothing.
+    const order = `Order ${run()}`
+    const bSwab = await create('supply-items', { tenant: siteB.id, name: 'B order swab', unit: 'each', openingStock: 10 })
+    const bRecipe = await create('supply-recipes', { tenant: siteB.id, name: 'B order kit', key: `bk-${run().toLowerCase()}`, lines: [{ item: bSwab.id, quantity: 1 }] })
+    const bId = `B-${run()}`
+    await buildUnits(payload, { id: bRecipe.id }, [bId], { scope: siteB.id })
+    await assignUnits(payload, { id: bRecipe.id }, 1, { reference: order, scope: siteB.id })
+    const movements = async () => (await payload.count({ collection: 'supply-movements' as never, where: { item: { equals: swabId } } })).totalDocs
+    const unitCount = async () => (await payload.count({ collection: 'assembled-units' as never, where: { recipe: { equals: recipe.id } } })).totalDocs
+    const [m0, u0] = [await movements(), await unitCount()]
+    await expect(buildUnits(payload, { id: recipe.id }, [`A-${run()}`], { scope: siteA.id, assignTo: order })).rejects.toMatchObject({ code: 'nothingReserved' })
+    await expect(buildUnits(payload, { id: recipe.id }, [`A-${run()}`], { scope: siteA.id, assignTo: '  ' })).rejects.toMatchObject({ code: 'reference' })
+    // Nothing built, nothing taken off stock, and site B's unit is still kept for its order.
+    expect([await movements(), await unitCount()]).toEqual([m0, u0])
+    expect((await unitsOf(bRecipe))[bId]).toMatchObject({ status: 'assigned', assignedTo: order })
+  })
+
   it('keeps one site’s orders away from another’s units', async () => {
     const { recipe, ids } = await stocked(1)
     await expect(swapUnit(payload, { reference: 'B order', take: { externalId: ids[0]! }, scope: siteB.id })).rejects.toThrow(/hasn’t been built/)
