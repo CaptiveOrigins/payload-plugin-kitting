@@ -48,7 +48,9 @@ export function sitesAllowed(where: unknown, scopeField: string | undefined): Se
   const parts: (Set<string> | null)[] = []
   for (const [key, value] of Object.entries(where)) {
     if (key === 'and' || key === 'or') {
-      const sets = (value as unknown[]).map((w) => sitesAllowed(w, scopeField))
+      // An empty or malformed list can't be read safely: show nothing.
+      if (!Array.isArray(value) || value.length === 0) return null
+      const sets = value.map((w) => sitesAllowed(w, scopeField))
       if (sets.some((x) => x === null)) return null
       const all = sets as Set<string>[]
       parts.push(key === 'or' ? new Set(all.flatMap((x) => [...x])) : new Set([...all[0]!].filter((id) => all.every((x) => x.has(id)))))
@@ -62,6 +64,7 @@ export function sitesAllowed(where: unknown, scopeField: string | undefined): Se
     else if (op === 'in' && Array.isArray(arg) && arg.every(siteID)) parts.push(new Set(arg.map(String)))
     else return null
   }
+  if (parts.length === 0) return null
   // Several keys in one object are all required, as Payload reads them.
   return new Set([...parts[0]!].filter((id) => parts.every((x) => x!.has(id))))
 }

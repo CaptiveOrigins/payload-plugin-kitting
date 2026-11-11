@@ -108,3 +108,10 @@ describe('reading an access query as a list of sites (for Restock’s arrivals)'
     expect(sitesAllowed({ tenant: { equals: 'site-a' } }, undefined)).toBeNull()
   })
 })
+
+describe('sitesAllowed edge cases', () => {
+  it('shows nothing for an empty list, an empty query or a malformed list, instead of throwing', () => {
+    for (const w of [{}, { and: [] }, { or: [] }, { and: 'x' }, { or: [{}] }]) expect(sitesAllowed(w, 'tenant'), JSON.stringify(w)).toBeNull()
+    expect([...sitesAllowed({ or: [{ tenant: { equals: 'a' } }, { tenant: { in: ['b'] } }] }, 'tenant')!].sort()).toEqual(['a', 'b'])
+  })
+})
