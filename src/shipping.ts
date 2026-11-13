@@ -3,10 +3,10 @@ import type { Payload, PayloadRequest } from 'payload'
 import type { PackedBox, ShippingAddress, ShippingProvider, ShippingRate } from './contracts/shipping.js'
 
 /**
- * An optional adapter for the Shipping plugin (`@captiveorigins/payload-plugin-shipping`), without importing it.
+ * An optional adapter for the Shipping plugin (`@extantape/payload-plugin-shipping`), without importing it.
  * The types below copy the shape of Shipping's `quote(payload, input, req)`, so its function can be passed as it is:
  *
- *   import { quote } from '@captiveorigins/payload-plugin-shipping'
+ *   import { quote } from '@extantape/payload-plugin-shipping'
  *   kittingPlugin({ shipping: { provider: ratesFromShipping({ quote, from: warehouse }) } })
  *
  * Going through `quote` keeps Shipping's own checks (its go-ahead hook, test or production mode) in front of

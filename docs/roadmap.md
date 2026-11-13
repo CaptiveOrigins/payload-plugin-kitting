@@ -4,7 +4,7 @@ Planned, not built. Each item will move into the README when it exists. Open wor
 
 ## Moved: ordering from suppliers
 
-Built as its own plugin, Restock (`@captiveorigins/payload-plugin-restock`, decided 2026-11-09), so Kitting stays usable without it. Restock drafts purchase orders from Kitting's `restockNeeds`, a person approves every order, and nothing is bought by the plugin. The design note that was here (2026-11-08) is in this file's git history; Restock's own decisions replace it.
+Built as its own plugin, Restock (`@extantape/payload-plugin-restock`, decided 2026-11-09), so Kitting stays usable without it. Restock drafts purchase orders from Kitting's `restockNeeds`, a person approves every order, and nothing is bought by the plugin. The design note that was here (2026-11-08) is in this file's git history; Restock's own decisions replace it.
 
 ## Later: point-of-sale integrations
 
