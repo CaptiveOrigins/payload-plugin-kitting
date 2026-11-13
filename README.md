@@ -61,11 +61,11 @@ It doesn't do purchase orders, costs or prices yet.
 ## Install
 
 ```bash
-npm install @captiveorigins/payload-plugin-kitting
+npm install @extantape/payload-plugin-kitting
 ```
 
 ```ts
-import { kittingPlugin } from '@captiveorigins/payload-plugin-kitting'
+import { kittingPlugin } from '@extantape/payload-plugin-kitting'
 
 export default buildConfig({
   plugins: [
@@ -87,7 +87,7 @@ If your app already has a collection with one of Kitting's slugs (for example `b
 ## Orders
 
 ```ts
-import { assignUnits, release, shipUnits, swapUnit } from '@captiveorigins/payload-plugin-kitting'
+import { assignUnits, release, shipUnits, swapUnit } from '@extantape/payload-plugin-kitting'
 
 // Keep 3 kits for an order: ready ones first (oldest built first), a build request for the rest.
 // Running it again for the same reference adds only the difference.
@@ -155,14 +155,14 @@ Demand is weighted towards recent weeks (a day 30 days old counts half). Until t
 
 ## What to buy (for Restock)
 
-`restockNeeds(payload, { scope })` lists each supply worth buying, in its own unit. The amount is the larger of its reorder suggestion when it's below level, and what building every recipe up to its number to keep would take, minus usable stock. Each comes with the reason, for example "20 Sample kit to build need 60 each, 25 usable". It reads and changes nothing. `@captiveorigins/payload-plugin-restock` uses it to draft purchase orders (crossing `kitting-restock`).
+`restockNeeds(payload, { scope })` lists each supply worth buying, in its own unit. The amount is the larger of its reorder suggestion when it's below level, and what building every recipe up to its number to keep would take, minus usable stock. Each comes with the reason, for example "20 Sample kit to build need 60 each, 25 usable". It reads and changes nothing. `@extantape/payload-plugin-restock` uses it to draft purchase orders (crossing `kitting-restock`).
 
 `restockArrivals(payload, { req })` is the other direction: Restock's delivered orders waiting for someone to confirm them, for the Today line. Only a signed-in person who may manage supplies gets them. If Restock fails, Today loads without that line.
 
 ## Building units from your code
 
 ```ts
-import { buildUnits } from '@captiveorigins/payload-plugin-kitting'
+import { buildUnits } from '@extantape/payload-plugin-kitting'
 
 const { units } = await buildUnits(payload, { key: 'sample-kit' }, ['ZX-1001', 'ZX-1002'], { scope: siteId, user: req.user })
 // units[0].lotsUsed: [{ item, lot, quantity }, …]
@@ -173,7 +173,7 @@ To create or link your own record for each unit in the same transaction, pass `u
 ## Using stock when you make something
 
 ```ts
-import { applyRecipe, KittingError } from '@captiveorigins/payload-plugin-kitting'
+import { applyRecipe, KittingError } from '@extantape/payload-plugin-kitting'
 
 try {
   const { movements } = await applyRecipe(payload, { key: 'sample-kit' }, 50, {

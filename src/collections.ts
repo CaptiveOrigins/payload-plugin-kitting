@@ -183,7 +183,7 @@ export function itemsCollection(o: ResolvedSupplies): CollectionConfig {
             {
               name: 'shrinkageSuggestion',
               type: 'ui' as const,
-              admin: { components: { Field: '@captiveorigins/payload-plugin-kitting/rsc#ShrinkageSuggestion' }, condition: (_d: unknown, _s: unknown, { operation }: { operation?: string }) => operation !== 'create' },
+              admin: { components: { Field: '@extantape/payload-plugin-kitting/rsc#ShrinkageSuggestion' }, condition: (_d: unknown, _s: unknown, { operation }: { operation?: string }) => operation !== 'create' },
             },
           ]
         : []),

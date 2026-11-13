@@ -2,7 +2,7 @@ import type { Payload, PayloadRequest } from 'payload'
 
 /**
  * Crossing `kitting-shipping` (2026-11-08): the contract between Kitting's box
- * recommendations and a shipping plugin (such as `@captiveorigins/payload-plugin-shipping`).
+ * recommendations and a shipping plugin (such as `@extantape/payload-plugin-shipping`).
  * Types only. Each plugin works without the other:
  * - With no provider, Kitting ranks packings by its own cost rules (box cost, postage bands).
  * - A provider never needs Kitting: packed boxes are plain data.

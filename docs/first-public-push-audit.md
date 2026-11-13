@@ -2,7 +2,7 @@
 
 By the Kitting Plugin session, 2026-11-09, at commit 5b09d2d (Release 0.2.0), with the repo still private. Making it public is the owner's step.
 
-Why now: npm accepts provenance only from public repositories. Release run https://github.com/CaptiveOrigins/payload-plugin-kitting/actions/runs/42703638071 failed at staging with "Only public source repositories are supported when publishing with provenance". Nothing was staged or published.
+Why now: npm accepts provenance only from public repositories. Release run https://github.com/ExtantApe/payload-plugin-kitting/actions/runs/42703638071 failed at staging with "Only public source repositories are supported when publishing with provenance". Nothing was staged or published.
 
 All 36 commits on every branch were scanned, not just the latest files.
 
