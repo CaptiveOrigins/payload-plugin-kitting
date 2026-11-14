@@ -1,6 +1,6 @@
 # Roadmap
 
-Planned, not built. Each item will move into the README when it exists. Open work is tracked in the ops task log (owner, 2026-11-10, D26): the packing station is K10, the 0.3.0 release K11, point-of-sale K13.
+Planned, not built. Each item will move into the README when it exists. Open work: the packing station, the 0.3.0 release and point-of-sale.
 
 ## Moved: ordering from suppliers
 

@@ -15,7 +15,7 @@ All 36 commits on every branch were scanned, not just the latest files.
 | IP addresses, server or database hosts, deploy URLs | none |
 | Phone numbers, street addresses | none |
 | Real supplier, customer or kit data | none. Tests use made-up supplies, suppliers and IDs |
-| Home paths (`/Users/`), personal names | none. Git's author field holds the full name, which `~/Code/CLAUDE.md` allows |
+| Home folder paths, personal names | none. Git's author field holds the full name, which is allowed |
 | Claude session links in commit text | none |
 | Build output, packed files, `.env`, `.secrets/` | never committed |
 | Leak check in CI | yes, the first step of `.github/workflows/ci.yml` |

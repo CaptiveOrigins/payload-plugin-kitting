@@ -6,7 +6,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths-ignore: ['**.md', 'docs/**', 'LICENSE']
-# One run per branch or PR: a newer push cancels the older run (ops/rules/actions-minutes.md).
+# One run per branch or PR: a newer push cancels the older run.
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true

@@ -37,7 +37,7 @@ Tested: 70 tests (3 new, 1 extended).
 - **`restockNeeds(payload, { scope, req })`:** what to buy, per supply, with the reason. It takes the larger of two amounts: the reorder suggestion when stock is below its level, and what building recipes up to their target would need. Usable stock is subtracted from that. It's read-only and per site. This is Kitting's side of the kitting-restock contract.
 - New exports: `restockNeeds`, `stockCount`, `setupProgress`, `siteShrinkage` and their types.
 
-Tested: 67 integration tests against a real MongoDB on Payload 3.92 (6 new), plus a check of the setup, count, Today and shrinkage pages in a browser with made-up data. Not tested: a screen reader, and pressing "Use N%" with a real mouse (keyboard and scripted clicks worked; the automated browser's mouse clicks didn't reach it twice). That mouse check is step 8 of the owner's test T14.
+Tested: 67 integration tests against a real MongoDB on Payload 3.92 (6 new), plus a check of the setup, count, Today and shrinkage pages in a browser with made-up data. Not tested: a screen reader, and pressing "Use N%" with a real mouse (keyboard and scripted clicks worked; the automated browser's mouse clicks didn't reach it twice). That mouse check is step 8 of the owner's hands-on test.
 
 ## 0.1.0 (2026-11-09)
 

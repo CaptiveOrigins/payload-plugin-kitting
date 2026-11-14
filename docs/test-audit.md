@@ -1,6 +1,6 @@
 # Test audit
 
-Each audit maps what the plugin promises (README, docs/decisions.md) to the tests that prove it, then lists the gaps added and the gaps skipped, with the reason. Rule: `~/Code/CLAUDE.md`, "Test self-audits".
+Each audit maps what the plugin promises (README, docs/decisions.md) to the tests that prove it, then lists the gaps added and the gaps skipped, with the reason.
 
 ## 2026-11-08, first audit (after layers 1 and 2 and the stock methods)
 
@@ -35,7 +35,7 @@ Each audit maps what the plugin promises (README, docs/decisions.md) to the test
 
 ### Gaps skipped, and why
 
-- **The admin pages** (overview, builder form, nav link) aren't rendered in tests. They need a full Next and Payload admin, and their logic (`stockReport`, `buildUnits`, the endpoints) is tested directly. They're covered by the owner's hands-on test T14 (keyboard and VoiceOver included) and a browser check before the first npm publish. This is on the lead's list.
+- **The admin pages** (overview, builder form, nav link) aren't rendered in tests. They need a full Next and Payload admin, and their logic (`stockReport`, `buildUnits`, the endpoints) is tested directly. They're covered by the owner's hands-on test (keyboard and VoiceOver included) and a browser check before the first npm publish. This is on the lead's list.
 - **Two receipts at once with the same new lot number:** both would update the same supply, so MongoDB's write conflict aborts one. A unique index would also reject lots without a number, and they are allowed. Not worth a slow race test.
 - **Admin field conditions and descriptions:** these are framework rendering, so skipped as overkill.
 - **The email layout** (`defaultAlertEmail` HTML): the text is checked through the alert tests. The HTML is escaped by one small function, and the layout is cosmetic.
@@ -68,7 +68,7 @@ Each audit maps what the plugin promises (README, docs/decisions.md) to the test
 ### Skipped, and why
 
 - **Two packers scanning the same unit at the same moment.** Both write the same unit document, so MongoDB aborts one with a write conflict; the Kits side retries once, then asks to try again. A reliable race test would be slow and flaky.
-- **Screen reader.** That's the owner's test T14. The keyboard-only flow was checked in a browser.
+- **Screen reader.** That's in the owner's hands-on test. The keyboard-only flow was checked in a browser.
 - **Payments in the ecommerce test.** Kitting only reads orders, so payments are out of scope.
 
 ## 2026-11-09, third audit (after getting started, stock count and Today)
@@ -92,7 +92,7 @@ The setup page, the count page (keyboard only, with an invalid box blocking Save
 
 66 tests. Added: shrinkage settings per site. A site switches it off or changes its default, and other sites are unaffected. There's one set of settings per site. A viewer can't create them and another site's staff can't change them. Nobody reads them without signing in.
 
-Checked in a browser, with made-up data: the settings page, and the learned suggestion on a supply's page with its reasoning. "Use 10.3%" saved when pressed with the keyboard and when clicked by a script. Twice, a mouse click from the in-app browser pane didn't reach the button. A real mouse click from Playwright (`page.click()` with `trial: false`) did save it, 2% to 10.3%. At the button's centre, `elementFromPoint` returns the button itself, and its `pointer-events` is `auto`. So the in-app browser pane was at fault, not the page. The owner's hands-on test T14 still includes a mouse click.
+Checked in a browser, with made-up data: the settings page, and the learned suggestion on a supply's page with its reasoning. "Use 10.3%" saved when pressed with the keyboard and when clicked by a script. Twice, a mouse click from the in-app browser pane didn't reach the button. A real mouse click from Playwright (`page.click()` with `trial: false`) did save it, 2% to 10.3%. At the button's centre, `elementFromPoint` returns the button itself, and its `pointer-events` is `auto`. So the in-app browser pane was at fault, not the page. The owner's hands-on test still includes a mouse click.
 
 Skipped: rendering the supply page's suggestion in tests, which needs the full admin, as before.
 
@@ -140,7 +140,7 @@ Restock's move to Kitting 0.2.0 found that a scoped site which skips `kitting-se
 
 ## 2026-11-10, eighth audit (fortnightly pass over what landed since the fifth)
 
-Since the fifth audit: the scope field check (9662ca0), `buildUnits`' `assignTo` (f2b614c), and docs only (the station design, the decision feed, the roadmap). The sixth and seventh audits added tests with each change; this pass checks them against the README, the CHANGELOG and `docs/decisions.md`.
+Since the fifth audit: the scope field check (9662ca0), `buildUnits`' `assignTo` (f2b614c), and docs only (the station design, the decisions, the roadmap). The sixth and seventh audits added tests with each change; this pass checks them against the README, the CHANGELOG and `docs/decisions.md`.
 
 ### Covered
 
@@ -170,7 +170,7 @@ Since the fifth audit: the scope field check (9662ca0), `buildUnits`' `assignTo`
 
 Lead's follow-up (2026-11-10): the bug above is fixed. `assignTo` counts only units still kept, not shipped ones, as `swapUnit` does. The assignTo test now covers an order whose units have all shipped, and putting the old check back fails it.
 
-## 2026-11-10: scope check with Payload's multi-tenant plugin (K443)
+## 2026-11-10: scope check with Payload's multi-tenant plugin
 
 The eighth audit left this untried: every scope test added `tenant` by hand with `overrides`. `test/multi-tenant.test.ts` runs Kitting with `@payloadcms/plugin-multi-tenant` 3.92.1 (a devDependency, at the same version as `payload`) adding the field, on its own in-memory MongoDB databases. Kitting goes first in `plugins`, the tenant plugin second, as the tenant plugin asks.
 
@@ -231,4 +231,4 @@ Suite: 85 tests before, 89 after (`npx vitest run`). Follows the "For the lead" 
 - **The change.** `src/access.ts`: `sitesAllowed(where, scopeField)` reads a query as a set of site IDs when it names nothing but the scope field, with `equals` or `in` on string or number IDs, alone or under `and` (every part) or `or` (any part); several keys in one object must all hold. Anything else is `null`. `restockArrivals` takes `trueOrWhere`'s answer: `true` shows every order, a query `sitesAllowed` can read keeps the orders whose `scope` is in it, and anything else, an unreadable query included, shows nothing without asking Restock. An order whose `scope` isn't a string or number ID (missing, `null`, an object) never matches. The unused `exactlyTrue` was removed.
 - **Tests.** In `units.test.ts`, two pure tests: the shapes read as sites, and 26 shapes that must be `null` (other fields and operators, `tenant.id`, null, empty, object and NaN IDs, `in` with a non-list or a null, mixed `and`/`or`, no scope field). In `kitting.test.ts`, the arrivals test is split: "every site's to an exact true" (as before, now with two sites' orders), and "staff limited to some sites": site A's staff see site A's orders and not B's, B's see B's, a populated site counts, orders without a site never show (even for a query naming `'null'`), and 14 unreadable queries show nothing without asking Restock. In `multi-tenant.test.ts`, with Kitting's `manage` built from the multi-tenant plugin's own `getTenantAccess`: site A's staff see A's, staff of both sites see both, staff of no site see nothing, an admin sees both.
 - **Mutation checks.** 16 mutations, each a Python string replace restored byte for byte (SHA-256 checked). All 16 fail the suite: the old truthy `manage` check; an unreadable query let through; the site filter skipped for a query; the order-site type check removed; `isWhere` dropped from `sitesAllowed`; an unreadable `and`/`or` part ignored; `or` read as `and`; other fields accepted; several operators accepted; `equals` taking any value; `in` taking any values, or a non-list; empty-string and NaN IDs accepted; keys in one object not intersected. A first version also checked `site !== null` before the type check; it survived, because `typeof null` is `'object'`, so it was replaced by an explicit string-or-number check, which is killed.
-- **Skipped.** The real Restock isn't installed in Kitting's tests (Kitting doesn't depend on it, D2), so `arrived` is made up in Restock's shape; Restock's own tests check what it returns. The Today line isn't rendered in a real admin.
+- **Skipped.** The real Restock isn't installed in Kitting's tests (Kitting doesn't depend on it), so `arrived` is made up in Restock's shape; Restock's own tests check what it returns. The Today line isn't rendered in a real admin.

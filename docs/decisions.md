@@ -126,32 +126,23 @@ The waste and dud buffer is called **shrinkage**, the standard business term for
 
 ## 2026-11-08 (owner): test locally first, then publish
 
-The first npm version comes only after the owner has tried Kitting by hand: owner test T14 in the ops tests list, then N29 (the publish) with "Needs first: T14 passed". T14 runs on the owner's Mac against a locally packed copy (`npm pack`) and the platform's local Kitting branch, with nothing published, pushed or merged. The platform branch `supplies-plugin` waits for N29. This keeps the rule that the first published version has no untried UI.
+The first npm version comes only after the owner has tried Kitting by hand, and the publish waits for that test to pass. The test runs on the owner's Mac against a locally packed copy (`npm pack`) and the platform's local Kitting branch, with nothing published, pushed or merged. The platform branch `supplies-plugin` waits for the publish. This keeps the rule that the first published version has no untried UI.
 
 ## 2026-11-09 (made while building; the owner can change them)
 
 - **Kitting settings.** These are a collection with one document per site, not a Payload global, because globals can't be per site. A site's settings override the plugin's config. The config values are only the starting point.
 - **Learned shrinkage.** It's shown on each supply's page, and only a person's click applies it, which keeps "the person decides".
 
-## 2026-11-10: decision feed acknowledged (ops/decisions/all.md and the area feed)
+## 2026-11-10: standing rules from the owner
 
-Settled decisions from the owner, through Helm's feed. The feed holds the owner's exact words.
-
-- **D1** Settled decisions arrive through the feed and are acted on, not re-argued.
-- **D2** Build it right: agnostic plugins with optional adapters, best architecture first. This repo imports no other plugin from this set.
-- **D3** Owner steps and tests go to `~/Code/ops/inbox/` per `ops/rules/owner-items.md`, never straight to needs-you.md or tests.md.
-- **D4** Priority: Docker media, Minecraft server, then all the site work.
-- **D5** No private repos to save CI minutes. This repo is public, with the Actions-minutes rules.
-- **D6, D21** Plugin names need the owner's OK before work starts (ops/plugin-names.md). Kitting predates the review and is on npm; it isn't in the Approved table.
-- **D7** No launch dates: work follows the priority list in the ops timeline. A freeze point is cut only when the owner says so.
-- **D8** Seed World hears about every collection-structure change ahead of time, with versions, and audits when it lands.
-- **D12** No plugin-family tags yet. None are in `package.json` keywords.
-- **D13** The activation QR goes on the kit bag only, never on the kit's box. Kitting's own label presets (built unit, supply lot, shelf) carry no activation, and the packing station prints whatever the provider's sets list; activation stays the provider's (Kits').
-- Not for this repo: D9 (PM doc), D10 (tour before studbook), D11 (kids decide on guardian suggestions), D14 (plan B), D15 (Husbandry.Pro link), D16 (both views).
+- Build it right: agnostic plugins with optional adapters, best architecture first. This repo imports no other plugin from this set.
+- This repo is public, with limits on CI minutes.
+- No plugin-family tags yet. None are in `package.json` keywords.
+- The activation QR goes on the kit bag only, never on the kit's box. Kitting's own label presets (built unit, supply lot, shelf) carry no activation, and the packing station prints whatever the provider's sets list; activation stays the provider's (Kits').
 
 ## 2026-11-10 (made while building; the owner can change them): Shipping's rates through an adapter
 
-- **An exported adapter, not a new option.** `ratesFromShipping({ quote, from })` turns Shipping's `quote(payload, input, req)` into a `ShippingProvider`, passed as `shipping: { provider }`. `quoteRates` stays the one contract, so other carriers and Kits' provider are unchanged, and the adapter has a home for what only Shipping needs (a full ship-from address, US only, inches and ounces). Kitting copies the shape of Shipping's function and imports nothing from it (D2). It wraps Shipping's `quote`, not its carrier provider, so Shipping's go-ahead hook runs before every quote.
+- **An exported adapter, not a new option.** `ratesFromShipping({ quote, from })` turns Shipping's `quote(payload, input, req)` into a `ShippingProvider`, passed as `shipping: { provider }`. `quoteRates` stays the one contract, so other carriers and Kits' provider are unchanged, and the adapter has a home for what only Shipping needs (a full ship-from address, US only, inches and ounces). Kitting copies the shape of Shipping's function and imports nothing from it. It wraps Shipping's `quote`, not its carrier provider, so Shipping's go-ahead hook runs before every quote.
 - **Failures fall back, visibly.** A provider that throws or gives the wrong shape never blocks packing. The suggestion carries `fallback` and a marked summary, and the error's name (not its message, which may hold carrier details) is logged once per provider.
 - **Wrong shape at startup.** A provider passed in Kitting's own options without `quoteRates` stops startup. One found at `config.custom.shipping.provider` only warns, because the Shipping plugin keeps its own carrier provider there for its own use, and refusing would stop every site that installs both.
 - 2026-11-13: moved to the ExtantApe GitHub organization and the `@extantape` npm scope at the same version. EXTANT APE owns its reusable tools and licenses them to the platform. The earlier package name is deprecated with a pointer here, and GitHub redirects the old repository address.
