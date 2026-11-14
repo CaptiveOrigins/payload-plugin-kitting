@@ -1,6 +1,6 @@
 # Packing station: design (draft, 2026-11-10)
 
-A packing screen in Kitting, one per order reference. You scan items in (building them on the spot if needed), see progress box by box, tick off packing steps, and ship. Whatever owns the orders, Kits on Captive Origins or any other site or plugin, plugs in as a **provider**, with no imports either way. Agreed in principle with Kits (code-91) on 2026-11-10, for after tour v3; updated the same day with Kits' review (addItem and removeItem, idempotent afterAllScanned, kept state, read-only after Ship, phone width). Not built; nothing here is tested.
+A packing screen in Kitting, one per order reference. You scan items in (building them on the spot if needed), see progress box by box, tick off packing steps, and ship. Whatever owns the orders, a sample kit plugin or any other site or plugin, plugs in as a **provider**, with no imports either way. Agreed in principle with Kits (code-91) on 2026-11-10, for after tour v3; updated the same day with Kits' review (addItem and removeItem, idempotent afterAllScanned, kept state, read-only after Ship, phone width). Not built; nothing here is tested.
 
 ## What Kitting owns
 

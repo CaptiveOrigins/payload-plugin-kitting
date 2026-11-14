@@ -19,7 +19,7 @@ All 36 commits on every branch were scanned, not just the latest files.
 | Claude session links in commit text | none |
 | Build output, packed files, `.env`, `.secrets/` | never committed |
 | Leak check in CI | yes, the first step of `.github/workflows/ci.yml` |
-| LICENSE | MIT, "Copyright (c) 2026 Captive Origins", in the npm package |
+| LICENSE | MIT, now "Copyright (c) 2026 EXTANT APE", in the npm package |
 | README status line | yes |
 
 Result: clean. Nothing needed rewriting.

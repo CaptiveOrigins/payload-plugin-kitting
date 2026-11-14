@@ -2,7 +2,7 @@
 
 ## 2026-11-08 (owner)
 
-- A new general plugin, first named `payload-plugin-supplies`, now `payload-plugin-kitting` (see below). Repo under CaptiveOrigins, created private. MIT. Going public needs the owner's OK.
+- A new general plugin, first named `payload-plugin-supplies`, now `payload-plugin-kitting` (see below). Repo created private. MIT. Going public needs the owner's OK.
 - Placeholders for now: made-up supplies, quantities, thresholds and alert addresses (example.com), clearly marked. The owner fills in the real ones later.
 - Nothing in the plugin names a particular product, site or person.
 
@@ -33,7 +33,7 @@ In the owner's words: "we should never have to mark supplies down as we use them
 
 ## 2026-11-08 (owner): renamed to Kitting
 
-- The repo is now CaptiveOrigins/payload-plugin-kitting, and the package is `@captiveorigins/payload-plugin-kitting`. It was renamed before it was ever published, and GitHub redirects the old URL.
+- The repo and the package are now named `payload-plugin-kitting`. It was renamed before it was ever published, and GitHub redirects the old URL.
 - Positioning, in the owner's words: Kitting "spells out that it can be dumbed down into just a supply tracker, but it's so much more (optionally, of course)". The description opens "Kitting for Payload: track supplies, and optionally build multi-part products (kits) from them…".
 - **Three levels, each switched on in config and understandable on its own:**
   1. A plain supply tracker: items, stock and low-stock alerts, with nothing else on.
@@ -78,7 +78,7 @@ Each method shows its result with a plain-language explanation. The admin can co
 
 ## 2026-11-08 (owner): who Kitting is for
 
-The owner's example: a family-run coffee shop sets it up once, "by being thorough and setting recipes down to the tee", and from then on it tracks how much they need of every single thing in the shop. "The point is that it could make running a business for someone so easy they could do it themselves." Kits on Captive Origins stay the first user, but Kitting is designed and worded for a small business owner with no IT department. The layered setup stays (tracker → recipes and builder → fulfilment), so the simple case stays simple.
+The owner's example: a family-run coffee shop sets it up once, "by being thorough and setting recipes down to the tee", and from then on it tracks how much they need of every single thing in the shop. "The point is that it could make running a business for someone so easy they could do it themselves." Sample kits on the first site stay the first use, but Kitting is designed and worded for a small business owner with no IT department. The layered setup stays (tracker → recipes and builder → fulfilment), so the simple case stays simple.
 
 Planned as a result:
 
@@ -133,17 +133,17 @@ The first npm version comes only after the owner has tried Kitting by hand: owne
 - **Kitting settings.** These are a collection with one document per site, not a Payload global, because globals can't be per site. A site's settings override the plugin's config. The config values are only the starting point.
 - **Learned shrinkage.** It's shown on each supply's page, and only a person's click applies it, which keeps "the person decides".
 
-## 2026-11-10: decision feed acknowledged (ops/decisions/all.md, captive-origins.md)
+## 2026-11-10: decision feed acknowledged (ops/decisions/all.md and the area feed)
 
 Settled decisions from the owner, through Helm's feed. The feed holds the owner's exact words.
 
 - **D1** Settled decisions arrive through the feed and are acted on, not re-argued.
-- **D2** Build it right: agnostic plugins with optional adapters, best architecture first. This repo imports no other Captive Origins plugin.
+- **D2** Build it right: agnostic plugins with optional adapters, best architecture first. This repo imports no other plugin from this set.
 - **D3** Owner steps and tests go to `~/Code/ops/inbox/` per `ops/rules/owner-items.md`, never straight to needs-you.md or tests.md.
-- **D4** Priority: Docker media, Minecraft server, then all Captive Origins.
+- **D4** Priority: Docker media, Minecraft server, then all the site work.
 - **D5** No private repos to save CI minutes. This repo is public, with the Actions-minutes rules.
 - **D6, D21** Plugin names need the owner's OK before work starts (ops/plugin-names.md). Kitting predates the review and is on npm; it isn't in the Approved table.
-- **D7** No launch dates: work follows the priority list in ops/timeline-captive-origins.md. A freeze point is cut only when the owner says so.
+- **D7** No launch dates: work follows the priority list in the ops timeline. A freeze point is cut only when the owner says so.
 - **D8** Seed World hears about every collection-structure change ahead of time, with versions, and audits when it lands.
 - **D12** No plugin-family tags yet. None are in `package.json` keywords.
 - **D13** The activation QR goes on the kit bag only, never on the kit's box. Kitting's own label presets (built unit, supply lot, shelf) carry no activation, and the packing station prints whatever the provider's sets list; activation stays the provider's (Kits').
